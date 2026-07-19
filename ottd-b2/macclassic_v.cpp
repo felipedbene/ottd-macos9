@@ -33,9 +33,10 @@ static Palette _local_palette;
 
 /** The classic Mac OS (QuickDraw) video driver. */
 class VideoDriver_MacClassic : public VideoDriver {
-	static const int MAX_RECTS = 16;
+	static const int MAX_RECTS = 32;
 	struct { int left, top, width, height; } rects[MAX_RECTS];
-	int num_rects = 0; // > MAX_RECTS means "everything dirty"
+	int num_rects = 0; // > MAX_RECTS means "too many rects" -> blit the union bbox
+	int u_l = 0, u_t = 0, u_r = 0, u_b = 0; // union bounding box of all dirty rects this frame
 	int last_mx = -1, last_my = -1;
 
 public:
@@ -113,6 +114,17 @@ void VideoDriver_MacClassic::PushPalette(int first, int count)
 
 void VideoDriver_MacClassic::MakeDirty(int left, int top, int width, int height)
 {
+	/* Always grow the union bounding box so an overflow frame can present that box
+	 * (<= whole screen) instead of falling back to a full 640x480 CopyBits. */
+	int r = left + width, b = top + height;
+	if (this->num_rects == 0) {
+		this->u_l = left; this->u_t = top; this->u_r = r; this->u_b = b;
+	} else {
+		if (left < this->u_l) this->u_l = left;
+		if (top  < this->u_t) this->u_t = top;
+		if (r    > this->u_r) this->u_r = r;
+		if (b    > this->u_b) this->u_b = b;
+	}
 	if (this->num_rects < MAX_RECTS) {
 		this->rects[this->num_rects].left = left;
 		this->rects[this->num_rects].top = top;
@@ -129,7 +141,9 @@ void VideoDriver_MacClassic::Paint()
 	this->num_rects = 0;
 
 	if (n > MAX_RECTS) {
-		macsys_blit(0, 0, _screen.width, _screen.height);
+		/* Too many rects to present individually: blit the single union bounding box
+		 * (macsys_blit clamps to screen) instead of the whole 640x480. */
+		macsys_blit(this->u_l, this->u_t, this->u_r - this->u_l, this->u_b - this->u_t);
 	} else {
 		for (int i = 0; i < n; i++) {
 			macsys_blit(this->rects[i].left, this->rects[i].top, this->rects[i].width, this->rects[i].height);
@@ -141,9 +155,15 @@ void DoPaletteAnimations(); // gfx.cpp — advances the animated palette range (
 
 void VideoDriver_MacClassic::CheckPaletteAnim()
 {
-	/* Advance the animated palette every draw tick. On an 8bpp CLUT screen the
-	 * VIDEO_BACKEND path below re-pushes only the changed range via SetEntries, so
-	 * water/lights shimmer for free — no framebuffer redraw needed. */
+	/* R1-73: throttle palette animation to every 4th frame. At 8bpp we drive the CLUT
+	 * via SetEntries, which BLOCKS on vertical-blank (~0-16ms) every call — doing it every
+	 * frame adds per-frame jitter (a hidden hiccup source once we went to 256 colours).
+	 * Water/lights don't need 30fps; every 4th frame stays smooth and cuts the jitter ~4x. */
+	static uint pa = 0;
+	if ((++pa & 3) != 0) return;
+
+	/* Advance the animated palette. On an 8bpp CLUT screen the VIDEO_BACKEND path below
+	 * re-pushes only the changed range via SetEntries, so water/lights shimmer for free. */
 	DoPaletteAnimations();
 
 	if (!CopyPalette(_local_palette)) return;
@@ -266,12 +286,29 @@ void VideoDriver_MacClassic::MainLoop()
 	this->StartGameThread(); // no-op: NO_THREADS makes StartNewThread fail -> inline game loop
 
 	uint iter = 0;
+	unsigned long work_ticks = 0; // Phase 2: sum of per-frame Tick() work-time (excl. sleep)
+	uint frames = 0;
 	for (;;) {
 		if (_exit_game) break;
 
 		if (iter < 3 || (iter & 0x3FF) == 0) ottd_log("macclassic: loop iter %u", iter); // bring-up heartbeat
 		iter++;
+
+		/* Time the frame's WORK (GameLoop + UpdateWindows composite + Paint present),
+		 * excluding the pacing sleep, so the redraw-cost win is measurable on hardware.
+		 * TickCount() is ~60.15 Hz; summed over 256 frames it's a fair average. */
+		unsigned long t0 = macsys_ticks();
 		this->Tick();
+		work_ticks += macsys_ticks() - t0;
+		if (++frames >= 256) {
+			/* ms/frame*100 = work_ticks * (1000/60) / 256 * 100 */
+			unsigned long msx100 = work_ticks * 100000UL / 60UL / 256UL;
+			ottd_log("R1 perf: 256 frames work=%lu ticks (~%lu.%02lu ms/frame, redraw cost)",
+			         work_ticks, msx100 / 100, msx100 % 100);
+			work_ticks = 0;
+			frames = 0;
+		}
+
 		this->SleepTillNextTick();
 	}
 

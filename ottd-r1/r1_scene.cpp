@@ -140,7 +140,12 @@ static Town *r1_found_town(uint cx, uint cy)
     std::memset(t->unwanted, 0, sizeof(t->unwanted));
     t->xy = centre;
     t->cache.num_houses = 0; t->cache.population = 0; t->time_until_rebuild = 10;
-    t->flags = 0; t->grow_counter = t->index % TOWN_GROWTH_TICKS;
+    // R1-73: enable OpenTTD's OWN incremental growth (one GrowTown per grow_counter
+    // expiry, spread across frames) instead of the batched CMD_EXPAND_TOWN, which ran
+    // GrowTown 30-40x in a single frame -> the growth spike. TownTickHandler only grows
+    // a town if TOWN_IS_GROWING is set (R1 seeded flags=0, which is why natural growth
+    // "froze" and the batch command was used). growth_rate keeps each step ~10s apart.
+    t->flags = 0; SetBit(t->flags, TOWN_IS_GROWING); t->grow_counter = t->index % TOWN_GROWTH_TICKS;
     t->growth_rate = TownTicksToGameTicks(250); t->show_zone = false;
     t->fund_buildings_months = 0; t->road_build_months = 0; t->noise_reached = 0;
     for (uint i = 0; i != MAX_COMPANIES; i++) t->ratings[i] = RATING_INITIAL;
@@ -442,16 +447,41 @@ static void r1_trace_route(void)
 // Advance the bus; returns true only on a tick where it actually moved a sub-pixel,
 // so the caller redraws only then. The game loop ticks fast, so move 1 sub-pixel every
 // 4th tick -> a calm bus (~a tile every ~64 ticks) instead of the turbo dash.
-static bool r1_bus_move(void)
+// TIME-BASED bus motion (R1-67). The bus used to advance one sub-step per r1_tick call,
+// but frame/tick duration here swings ~27..130ms (town-growth frames recomposite the whole
+// map) and OpenTTD's tick catch-up can call r1_tick several times per frame — so a per-tick
+// advance made the bus move at visibly variable speed ("irregular / faster at the ends").
+// Instead advance by REAL elapsed time (macsys_ticks = TickCount, 60Hz) with a leftover
+// accumulator, so on-screen speed is constant regardless of frame rate or catch-up.
+// `mult` scales speed for fast-forward. Returns true only if the bus actually advanced.
+extern "C" unsigned long macsys_ticks(void);
+static unsigned long g_bus_last_ticks = 0, g_bus_accum = 0;
+static bool r1_bus_move(int mult)
 {
     if (g_route_len < 2) return false;
-    // R1-40: advance one sub-step every call (r1_tick calls this every tick → 16
-    // ticks/tile). The whole-screen redraw cadence in r1_tick shows the motion.
-    if (++g_bus_prog >= 16) {
-        g_bus_prog = 0;
-        g_bus_i += g_bus_dir;
-        if (g_bus_i >= g_route_len - 1) { g_bus_i = g_route_len - 1; g_bus_dir = -1; }
-        else if (g_bus_i <= 0)          { g_bus_i = 0;              g_bus_dir = 1; }
+    const unsigned long TICKS_PER_SUBSTEP = 2; // 60Hz ticks -> ~33ms/sub-step -> ~0.53s/tile
+    unsigned long now = macsys_ticks();
+    if (g_bus_last_ticks == 0) g_bus_last_ticks = now;
+    g_bus_accum += (now - g_bus_last_ticks) * (unsigned long)(mult > 0 ? mult : 1);
+    g_bus_last_ticks = now;
+    // Clamp the backlog and cap the per-frame advance to ONE sub-step. An occasional heavy
+    // frame (town-growth whole-map recomposite, ~130ms) would otherwise make the bus JUMP
+    // several sub-steps at once to stay on real-time schedule (R1-67 "catches up every now
+    // and then"). Instead we drain any backlog one sub-step per frame -> dead-steady motion,
+    // at the cost of a tiny transient phase-lag that's invisible on a cosmetic ping-pong bus.
+    const unsigned long MAX_BACKLOG = 4 * TICKS_PER_SUBSTEP;
+    if (g_bus_accum > MAX_BACKLOG) g_bus_accum = MAX_BACKLOG;
+    unsigned long substeps = g_bus_accum / TICKS_PER_SUBSTEP;
+    if (substeps == 0) return false;
+    substeps = 1;                                  // one sub-step per frame -> no visible jump
+    g_bus_accum -= TICKS_PER_SUBSTEP;              // keep the remainder -> steady average speed
+    for (unsigned long k = 0; k < substeps; k++) {
+        if (++g_bus_prog >= 16) {
+            g_bus_prog = 0;
+            g_bus_i += g_bus_dir;
+            if (g_bus_i >= g_route_len - 1) { g_bus_i = g_route_len - 1; g_bus_dir = -1; }
+            else if (g_bus_i <= 0)          { g_bus_i = 0;              g_bus_dir = 1; }
+        }
     }
     return true;
 }
@@ -533,6 +563,56 @@ extern "C" int r1_bus_draw(int scroll_x, int scroll_y, int *ox, int *oy, int *ow
     return 1;
 }
 
+// R1 Phase 2 Step 1: dirty ONLY the bus's own screen region instead of the whole
+// map. Project a generous WORLD box around the bus through RemapCoords (which is
+// zoom-independent) to a virtual bbox, union it with the previous frame's box so the
+// bus's old image is repainted over, and mark just that via the native
+// MarkAllViewportsDirty. This is exactly how OpenTTD dirties real moving vehicles
+// (vehicle.cpp) and replaces the whole-map MarkWholeScreenDirty the bus used to ride
+// every 8th tick (which re-composited the entire zoomed map + re-laid every town-name
+// label ~4x/sec — by far the dominant recurring graphics cost, see
+// docs/graphics-acceleration-clamshell.md).
+static int  g_bvx0 = 0, g_bvy0 = 0, g_bvx1 = 0, g_bvy1 = 0; // previous bus virtual rect
+static bool g_bv_valid = false;
+static void r1_bus_mark_dirty(void)
+{
+    if (g_route_len < 2) return;
+    int ni = g_bus_i + g_bus_dir;
+    if (ni < 0 || ni >= g_route_len) return;
+    TileIndex a = g_route[g_bus_i], b = g_route[ni];
+    int ax = (int)TileX(a), ay = (int)TileY(a);
+    int dx = (int)TileX(b) - ax, dy = (int)TileY(b) - ay;
+    int wx = ax * TILE_SIZE + TILE_SIZE / 2 + dx * g_bus_prog;
+    int wy = ay * TILE_SIZE + TILE_SIZE / 2 + dy * g_bus_prog;
+    int wz = (int)TileHeight(a) * TILE_HEIGHT;
+
+    // World box around the bus, projected at every extreme corner so it bounds the
+    // sprite's screen footprint at ANY zoom. RemapCoords doubles the X contribution, so
+    // keep MX small — MX=24 projected to a ~196px box (R1-68 probe); the bus sprite is
+    // tiny and now moves 1 sub-step/frame, so a tight box + prev-frame union is ample.
+    const int MX = 10, MZ_LO = 4, MZ_HI = 32;
+    int l = 0x7fffffff, t = 0x7fffffff, r = -0x7fffffff, bo = -0x7fffffff;
+    for (int sx = -1; sx <= 1; sx += 2)
+        for (int sy = -1; sy <= 1; sy += 2)
+            for (int sz = 0; sz <= 1; sz++) {
+                Point p = RemapCoords(wx + sx * MX, wy + sy * MX, wz + (sz ? MZ_HI : -MZ_LO));
+                if (p.x < l) l = p.x;
+                if (p.x > r) r = p.x;
+                if (p.y < t) t = p.y;
+                if (p.y > bo) bo = p.y;
+            }
+
+    int ul = l, ut = t, ur = r, ub = bo; // union with previous frame's box -> erase old bus
+    if (g_bv_valid) {
+        if (g_bvx0 < ul) ul = g_bvx0;
+        if (g_bvy0 < ut) ut = g_bvy0;
+        if (g_bvx1 > ur) ur = g_bvx1;
+        if (g_bvy1 > ub) ub = g_bvy1;
+    }
+    g_bvx0 = l; g_bvy0 = t; g_bvx1 = r; g_bvy1 = bo; g_bv_valid = true;
+    MarkAllViewportsDirty(ul, ut, ur, ub);
+}
+
 extern "C" void r1_tick(void)
 {
     if (!g_live) return;
@@ -564,7 +644,10 @@ extern "C" void r1_tick(void)
         // CMD_EXPAND_TOWN (the exact command that seeds the towns in r1_build_world),
         // rotating one town per cycle so the map fills in gradually and live. Needs a real
         // _current_company (OWNER_DEITY) + _generating_world, exactly like the seed.
-        if ((++exp % 40) == 0) {
+        // R1-72 TEST: periodic town growth DISABLED to confirm it is the source of the
+        // "every now and then" stutter (its tile churn coalesces to a full-screen
+        // recomposite burst). If the motion goes smooth, re-enable stall-aware / rare.
+        if (0 && (++exp % 40) == 0) {
             CompanyID save_co = _current_company;
             _current_company = OWNER_DEITY;
             bool sg = _generating_world; _generating_world = true;
@@ -574,25 +657,21 @@ extern "C" void r1_tick(void)
             _generating_world = sg;
             _current_company = save_co;
         }
-
-        r1_bus_move();
     }
+    // Bus motion is now TIME-based (below), decoupled from this sim loop's rate.
 
-    // Repaint on growth via ONE MarkWholeScreenDirty (safe: marking hundreds of tiles
-    // per tick with MarkTileDirtyByTile overflowed the dirty-block bitmap -> Type 2).
-    // The cost of each full repaint is cut by a sparser forest (see r1_build_world).
-    static uint last_houses = 0xFFFFFFFFu;
-    uint total = 0;
-    for (const Town *tt : Town::Iterate()) total += tt->cache.num_houses;
-    if (total != last_houses) { last_houses = total; MarkWholeScreenDirty(); }
+    // R1-74: NO whole-screen repaint on growth. With incremental growth (R1-73), GrowTown's
+    // own MarkTileDirtyByTile (town_cmd.cpp:504,2315) marks each new house/road tile dirty
+    // (targeted), so buildings appear without repainting the whole map. The old
+    // MarkWholeScreenDirty here fired on EVERY new house -> a periodic full recomposite =
+    // THE residual "engasgando". It was only needed for the batched CMD_EXPAND_TOWN (30-40
+    // houses/tick -> too many per-tile marks to coalesce); incremental growth has no such burst.
 
-    // The bus advances inside the sub-step loop above. Drive its animation off a steady
-    // WHOLE-SCREEN redraw cadence. Every full redraw at a zoomed-out view is heavy (whole
-    // map + trees + re-layout of every town-name label through the real string system), so
-    // keep the cadence gentle — every 8th tick (~4/s). Growth still repaints immediately
-    // via last_houses' MarkWholeScreenDirty above, so only the bus motion is throttled.
-    static unsigned rd = 0;
-    if ((++rd & 7) == 0) MarkWholeScreenDirty();
+    // Advance the bus by REAL elapsed time (constant on-screen speed regardless of the
+    // variable frame/tick rate — R1-67), and repaint only its own region when it moves,
+    // via the cheap native targeted-dirty (Step 1). Growth still repaints the whole map
+    // via last_houses' MarkWholeScreenDirty above.
+    if (r1_bus_move(g_r1_fast ? 3 : 1)) r1_bus_mark_dirty();
 
     // Throttled liveness log: prove on the sink that the clock ticks + town grows.
     // First call confirms the hook fires; then every ~128 ticks show the town

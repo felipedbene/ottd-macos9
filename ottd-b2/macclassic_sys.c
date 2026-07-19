@@ -154,6 +154,17 @@ int macsys_create_window(int w, int h, const char *title)
     g_pm.pmTable = g_ctab;
 
     ottd_log("macsys: window %dx%d pitch=%d fb=%p", w, h, g_pitch, (void *)g_fb);
+
+    /* Phase 2 Step 3: report the main screen depth. At 8bpp the hardware CLUT drives
+     * palette animation for free (SetEntries) and CopyBits is a cheap same-depth blit;
+     * at >8bpp both are lost (CopyBits must CLUT-expand+dither, SetEntries is skipped).
+     * If this logs >8, set the display/VNC session to 256 colours. */
+    {
+        GDHandle gd = GetMainDevice();
+        int depth = (gd != NULL) ? (int)(*(*gd)->gdPMap)->pixelSize : -1;
+        if (depth == 8) ottd_log("macsys: screen depth=8bpp (OK: hw palette anim + cheap present)");
+        else            ottd_log("macsys: screen depth=%dbpp (WARN: set session to 256 colours for hw palette + cheap present)", depth);
+    }
     return 1;
 }
 
