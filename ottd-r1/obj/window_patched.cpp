@@ -1,4 +1,11 @@
 /*
+ * Modified for ottd-macos9 (OpenTTD -> Mac OS 9 / PowerPC port) in 2026 by
+ * Felipe De Bene. These modifications are distributed under the GNU General
+ * Public License, version 2 (see LICENSE and NOTICE). The original OpenTTD
+ * file notice follows below.
+ */
+
+/*
  * This file is part of OpenTTD.
  * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
  * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
