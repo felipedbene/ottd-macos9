@@ -41,10 +41,14 @@
 #include "company_func.h"
 #include "company_base.h"      // Company::Get (live money in the info window)
 #include "vehicle_base.h"      // R1-76: the REAL Vehicle pool (Vehicle::Iterate, fields)
+#include "economy_func.h"      // R1-77: SubtractMoneyFromCompany (bus fare = negative cost)
+#include "economy_type.h"      // EXPENSES_ROADVEH_REVENUE
+#include "command_type.h"      // CommandCost
 
 // R1-76: stand up ONE real pooled RoadVehicle (defined in ottd-m1/m1_vehicle.cpp, which owns
 // the real VehiclePool + object, WITHOUT the heavy vehicle.cpp/roadveh_cmd.cpp).
 extern "C" void r1_make_roadvehicle(uint tile, int x, int y, int z, int dir);
+extern "C" void r1_economy_startup(void);   // m1_economy.cpp — seed interest/upkeep constants
 #include "command_func.h"
 #include "road_type.h"
 #include "road_map.h"
@@ -459,6 +463,45 @@ static void r1_trace_route(void)
     ottd_log("R1: bus route len=%d", g_route_len);
 }
 
+// R1-77: the bus EARNS money — a hand-driven pickup->deliver fare (no Station/cargo TU).
+// Route endpoints sit next to a town's roads (r1_trace_route). On arrival: pick up a bus-load
+// from that town's REAL passenger supply, then on the far-end delivery credit the company via
+// SubtractMoneyFromCompany with a NEGATIVE cost (= income). Real Town::supplied + real mutator.
+static uint g_bus_pax = 0;   // passengers aboard
+
+static Town *r1_town_near(TileIndex t)
+{
+    Town *best = nullptr; uint bd = 0xFFFFFFFFu;
+    for (Town *tt : Town::Iterate()) {
+        uint d = DistanceManhattan(t, tt->xy);
+        if (d < bd) { bd = d; best = tt; }
+    }
+    return best;
+}
+
+static void r1_bus_arrive(void)
+{
+    if (g_route_len < 2) return;
+    Town *t = r1_town_near(g_route[g_bus_i]);
+    if (t == nullptr) return;
+    if (g_bus_pax == 0) {
+        // PICK UP up to a bus-load from this town's real passenger supply (population>>3).
+        uint avail = t->supplied[CT_PASSENGERS].old_max;
+        g_bus_pax = avail < 30 ? avail : 30;
+        t->supplied[CT_PASSENGERS].old_act += g_bus_pax;   // feeds GetPercentTransported()
+        return;
+    }
+    // DELIVER at the far town: fare ~ a simplified GetTransportedGoodsIncome.
+    uint dist = (uint)g_route_len;
+    Money fare = ((long long)dist * 200 * (long long)g_bus_pax * 3185) >> 21;
+    if (fare < 1) fare = 1;
+    CompanyID save = _current_company;
+    _current_company = COMPANY_FIRST;
+    SubtractMoneyFromCompany(CommandCost(EXPENSES_ROADVEH_REVENUE, -fare));  // negative = income
+    _current_company = save;
+    g_bus_pax = 0;
+}
+
 // Advance the bus; returns true only on a tick where it actually moved a sub-pixel,
 // so the caller redraws only then. The game loop ticks fast, so move 1 sub-pixel every
 // 4th tick -> a calm bus (~a tile every ~64 ticks) instead of the turbo dash.
@@ -494,8 +537,8 @@ static bool r1_bus_move(int mult)
         if (++g_bus_prog >= 16) {
             g_bus_prog = 0;
             g_bus_i += g_bus_dir;
-            if (g_bus_i >= g_route_len - 1) { g_bus_i = g_route_len - 1; g_bus_dir = -1; }
-            else if (g_bus_i <= 0)          { g_bus_i = 0;              g_bus_dir = 1; }
+            if (g_bus_i >= g_route_len - 1) { g_bus_i = g_route_len - 1; g_bus_dir = -1; r1_bus_arrive(); }
+            else if (g_bus_i <= 0)          { g_bus_i = 0;              g_bus_dir = 1; r1_bus_arrive(); }
         }
     }
     return true;
@@ -1078,7 +1121,10 @@ extern "C" void r1_start_window_system(void)
     // valid) so the canonical toolbar's build/station/finance/vehicle buttons enable and
     // construction has an owner. Must precede AllocateToolbar (the toolbar OnPaint reads it).
     r1_make_company();
-    ottd_log("R1: player company up (GetNumItems + _local_company set)");
+    // R1-77: seed the minimal economy (m1_economy.cpp) so the monthly finance loop has real
+    // interest/upkeep constants -> the company balance ticks each game-month.
+    r1_economy_startup();
+    ottd_log("R1: player company + economy up (GetNumItems + _local_company set)");
 
     ottd_log("R1: creating main window...");
     new R1MainWindow(&_r1_main_desc);
@@ -1092,6 +1138,12 @@ extern "C" void r1_start_window_system(void)
     ottd_log("R1: creating canonical toolbar (AllocateToolbar)...");
     AllocateToolbar();
     ottd_log("R1: canonical toolbar up");
+
+    // R1-77: open the info window at startup. It's the only place the live stats + real
+    // company money show, and the canonical toolbar's TOWN button is a stub (never calls
+    // r1_toggle_info_window), so nothing else opens it.
+    new R1InfoWindow(&_r1_info_desc);
+    ottd_log("R1: info window up (year/towns/pop/money)");
 }
 
 extern "C" int b2_scene_init(void)

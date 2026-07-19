@@ -124,7 +124,7 @@ void NetworkServerYearlyLoop() {}
 // no towns/industries/vehicles/stations created, the real bodies would iterate
 // empty pools anyway.
 // ---------------------------------------------------------------------------
-void CompaniesMonthlyLoop() {}   // company_cmd.cpp (also a network cascade)
+/* CompaniesMonthlyLoop moved to m1_economy.cpp (real mini finance loop). */
 void CompaniesYearlyLoop() {}
 // TownsMonthlyLoop / TownsYearlyLoop: REAL now (town_cmd.cpp compiled, build 6).
 void IndustryDailyLoop() {}       // industry_cmd.cpp

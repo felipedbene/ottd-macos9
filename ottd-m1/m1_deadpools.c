@@ -42,8 +42,10 @@ char _station_kdtree[4096]       = {0};
 #ifndef R1_MERGE  /* real viewport.o defines _viewport_sign_kdtree in the render-merge build */
 char _viewport_sign_kdtree[4096] = {0};
 #endif
+#ifndef R1_MERGE  /* real Economy _economy / Prices _price live in m1_economy.cpp (R1 build) */
 char _economy[4096]              = {0};
 char _price[2048]                = {0};
+#endif
 char _cheats[512]                = {0};
 char _house_mngr[4096]           = {0};
 #ifndef R1_STRINGS  /* real strings.cpp owns the StringParameters _global_string_params */
