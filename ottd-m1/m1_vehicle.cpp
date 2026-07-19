@@ -79,12 +79,14 @@ void      RoadVehicle::SetDestTile(TileIndex tile) { this->dest_tile = tile; }
  * at ground_vehicle.cpp, explicit-instantiated there — that TU is not compiled). */
 template <> bool GroundVehicle<RoadVehicle, VEH_ROAD>::IsChainInDepot() const { return false; }
 
-/* Stand up ONE real road vehicle in the pool (index 0). Idempotent-ish: caller creates once
- * at world build. Fields set for a valid, VISIBLE, renderable vehicle; the pool is Tzero, so
- * everything else (hashes, orders, caches) stays zeroed and unused. */
-extern "C" void r1_make_roadvehicle(uint tile, int x, int y, int z, int dir)
+/* Stand up ONE real road vehicle in the pool. Fields set for a valid, VISIBLE, renderable
+ * vehicle; the pool is Tzero, so everything else (hashes, orders, caches) stays zeroed and
+ * unused. Returns the new Vehicle* (as void* to keep C linkage) so a FLEET caller can give
+ * each bus its OWN pooled puppet (R1-78) instead of sharing "the first" pool element; returns
+ * nullptr if the pool is full. */
+extern "C" void *r1_make_roadvehicle(uint tile, int x, int y, int z, int dir)
 {
-	if (!RoadVehicle::CanAllocateItem()) return;
+	if (!RoadVehicle::CanAllocateItem()) return nullptr;
 	RoadVehicle *v = new RoadVehicle();
 	v->owner     = _local_company;
 	v->tile      = (TileIndex)tile;
@@ -95,4 +97,5 @@ extern "C" void r1_make_roadvehicle(uint tile, int x, int y, int z, int dir)
 	v->roadtype  = ROADTYPE_ROAD;
 	v->SetFrontEngine();              /* subtype |= GVSF_FRONT -> IsPrimaryVehicle() */
 	v->sprite_cache.sprite_seq.Set((SpriteID)(0xCD4 + dir));
+	return v;
 }

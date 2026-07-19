@@ -47,7 +47,7 @@
 
 // R1-76: stand up ONE real pooled RoadVehicle (defined in ottd-m1/m1_vehicle.cpp, which owns
 // the real VehiclePool + object, WITHOUT the heavy vehicle.cpp/roadveh_cmd.cpp).
-extern "C" void r1_make_roadvehicle(uint tile, int x, int y, int z, int dir);
+extern "C" void *r1_make_roadvehicle(uint tile, int x, int y, int z, int dir);
 extern "C" void r1_economy_startup(void);   // m1_economy.cpp — seed interest/upkeep constants
 #include "command_func.h"
 #include "road_type.h"
@@ -207,7 +207,23 @@ static const R1IndSite R1_INDUSTRIES[] = {
 };
 
 static int r1_noise(int x, int y, int scale);   // defined below (value noise)
-static void r1_trace_route(void);                // defined below (bus route)
+// R1-78: a FLEET. Each bus carries its OWN route + motion state + pooled Vehicle puppet, so N
+// buses drive independently. The per-bus state below used to be a single set of g_bus_* globals
+// (N=1); collapsing them into this struct + array is a mechanical generalization — the draw side
+// (ViewportAddVehicles) already iterated the whole pool, so it needed no change. Defined up here
+// (not in the bus section below) because r1_build_world seeds the fleet before that section.
+#define R1_NBUS 5
+struct R1Bus {
+    TileIndex route[64];
+    int  len, i, prog, dir;              // route path, current node, 0..15 sub-tile, +1/-1 ping-pong
+    uint pax;                            // passengers aboard (fare state)
+    unsigned long last_ticks, accum;     // time-based motion accumulator
+    int  bvx0, bvy0, bvx1, bvy1;         // previous virtual dirty rect (to erase the old sprite)
+    bool bv_valid;
+    Vehicle *v;                          // this bus's OWN pooled RoadVehicle (not "the first")
+};
+static R1Bus g_bus[R1_NBUS];             // zero-init: len=0 (no route) until traced
+static void r1_trace_route(R1Bus &b, int cx, int cy);  // defined below (bus route)
 static void r1_make_viewport(int scroll_x, int scroll_y, Viewport *vp);  // defined below (draw)
 // Tap-to-zoom cycles this; the draw + pick + bus read it. NORMAL=0..OUT_8X=3.
 static ZoomLevel g_zoom = ZOOM_LVL_OUT_4X;
@@ -266,12 +282,20 @@ extern "C" void r1_build_world(void)
             int n = r1_noise(x, y, 16) * 2 / 3 + r1_noise(x, y, 6) / 3;   // 0..255
             r1_hmap[y * R1_MAP + x] = (unsigned char)(n * MAXH / 255);
         }
-    // 2) flatten a small pad at each town centre so it seeds on level ground.
+    // 2) flatten a LARGE pad at each town centre so it can grow far past the old ~12-house
+    // stall. R1-78: the old 5x5 (-2..2) pad was the hard ceiling — town road extension rejects
+    // sloped bare land (IsRoadAllowedHere), so the town could never push its roads (and thus its
+    // houses) off the flat pad into the surrounding hills. A 19x19 (-9..9 = 361-tile) flat area
+    // matches the radius-11/12 buildable disc a 100-house town develops (UpdateTownRadius), so
+    // towns fill out to 100+ instead of boxing in. Centers 16/32/48 with a +-9 span stay inside
+    // the map interior [1..62]; neighboring pads (16 apart) touch around tile 24, reading as a
+    // larger built-up plain. Relaxation (below) still feathers the pad edges into the hills.
+    const int PAD = 9;
     for (uint i = 0; i < lengthof(R1_TOWNS); i++) {
         int cx = (int)R1_TOWNS[i].x, cy = (int)R1_TOWNS[i].y;
         unsigned char hc = r1_hmap[cy * R1_MAP + cx];
-        for (int dy = -2; dy <= 2; dy++)
-            for (int dx = -2; dx <= 2; dx++) {
+        for (int dy = -PAD; dy <= PAD; dy++)
+            for (int dx = -PAD; dx <= PAD; dx++) {
                 int x = cx + dx, y = cy + dy;
                 if (x >= 0 && x < (int)MapMaxX() && y >= 0 && y < (int)MapMaxY())
                     r1_hmap[y * R1_MAP + x] = hc;
@@ -370,7 +394,10 @@ extern "C" void r1_build_world(void)
     _current_company = OWNER_NONE;
     g_live = true;   // the render loop now ticks the engine each frame (r1_tick)
     g_full_dirty = true;  // force the first full frame to draw
-    r1_trace_route();// trace the bus route along the roads the towns just built
+    // R1-78: a FLEET — one bus per town, each tracing a route from its OWN town's roads.
+    // Any town whose roads are too short traces len<2 and its bus no-ops harmlessly.
+    for (uint i = 0; i < R1_NBUS; i++)
+        r1_trace_route(g_bus[i], (int)R1_TOWNS[i].x, (int)R1_TOWNS[i].y);
 
     // Place the industries on their flat pads (bare grass only). index=0 is a dummy —
     // our minimal proc draws from gfx alone and never touches the Industry pool.
@@ -401,7 +428,7 @@ extern "C" void r1_build_world(void)
             for (uint i = 0; i < lengthof(R1_TOWNS); i++) {
                 int dx = (int)x - (int)R1_TOWNS[i].x; if (dx < 0) dx = -dx;
                 int dy = (int)y - (int)R1_TOWNS[i].y; if (dy < 0) dy = -dy;
-                if ((dx > dy ? dx : dy) < 6) { near_town = true; break; }
+                if ((dx > dy ? dx : dy) < 10) { near_town = true; break; }  // R1-78: keep the enlarged town pad (PAD=9) clear of trees
             }
             if (near_town) continue;
             if (r1_noise(x, y, 6) < 190) continue;           // fewer "wooded" regions (cheaper full repaint)
@@ -426,26 +453,25 @@ extern "C" void r1_build_world(void)
 // pool / engine subsystem — just a position + a direction sprite (_roadveh_images[0]
 // = 0xCD4, + Direction), drawn by our real ViewportAddVehicles (un-stubbed) via
 // AddSortableSpriteToDraw and advanced each tick. Ping-pongs the route at its ends.
-static TileIndex g_route[64];
-static int g_route_len = 0, g_bus_i = 0, g_bus_prog = 0, g_bus_dir = 1;
-
-static void r1_trace_route(void)
+// R1-78: trace a route for one bus along its town's REAL roads (struct/array defined up top).
+static void r1_trace_route(R1Bus &b, int cx, int cy)
 {
-    g_route_len = 0; g_bus_i = 0; g_bus_prog = 0; g_bus_dir = 1;
+    b.len = 0; b.i = 0; b.prog = 0; b.dir = 1;
+    b.last_ticks = 0; b.accum = 0; b.pax = 0; b.bv_valid = false; b.v = nullptr;
     TileIndex start = INVALID_TILE;
     for (int r = 0; r <= 12 && start == INVALID_TILE; r++)
         for (int dy = -r; dy <= r && start == INVALID_TILE; dy++)
             for (int dx = -r; dx <= r; dx++) {
-                int x = 32 + dx, y = 32 + dy;
+                int x = cx + dx, y = cy + dy;
                 if (x < 1 || y < 1 || x >= (int)MapMaxX() || y >= (int)MapMaxY()) continue;
                 TileIndex t = TileXY((uint)x, (uint)y);
                 if (IsTileType(t, MP_ROAD)) { start = t; break; }
             }
     if (start == INVALID_TILE) return;
-    g_route[g_route_len++] = start;
+    b.route[b.len++] = start;
     TileIndex cur = start;
     DiagDirection came = INVALID_DIAGDIR;
-    while (g_route_len < 64) {
+    while (b.len < 64) {
         RoadBits rb = GetAnyRoadBits(cur, RTT_ROAD, false);
         DiagDirection best = INVALID_DIAGDIR;
         for (DiagDirection d = DIAGDIR_BEGIN; d < DIAGDIR_END; d = (DiagDirection)(d + 1)) {
@@ -457,18 +483,16 @@ static void r1_trace_route(void)
         if (best == INVALID_DIAGDIR) break;   // dead end -> the bus will ping-pong back
         cur = TileAddByDiagDir(cur, best);
         if (cur == start) break;              // closed loop
-        g_route[g_route_len++] = cur;
+        b.route[b.len++] = cur;
         came = ReverseDiagDir(best);
     }
-    ottd_log("R1: bus route len=%d", g_route_len);
+    ottd_log("R1: bus route len=%d (from %d,%d)", b.len, cx, cy);
 }
 
 // R1-77: the bus EARNS money — a hand-driven pickup->deliver fare (no Station/cargo TU).
 // Route endpoints sit next to a town's roads (r1_trace_route). On arrival: pick up a bus-load
 // from that town's REAL passenger supply, then on the far-end delivery credit the company via
 // SubtractMoneyFromCompany with a NEGATIVE cost (= income). Real Town::supplied + real mutator.
-static uint g_bus_pax = 0;   // passengers aboard
-
 static Town *r1_town_near(TileIndex t)
 {
     Town *best = nullptr; uint bd = 0xFFFFFFFFu;
@@ -479,27 +503,27 @@ static Town *r1_town_near(TileIndex t)
     return best;
 }
 
-static void r1_bus_arrive(void)
+static void r1_bus_arrive(R1Bus &b)
 {
-    if (g_route_len < 2) return;
-    Town *t = r1_town_near(g_route[g_bus_i]);
+    if (b.len < 2) return;
+    Town *t = r1_town_near(b.route[b.i]);
     if (t == nullptr) return;
-    if (g_bus_pax == 0) {
+    if (b.pax == 0) {
         // PICK UP up to a bus-load from this town's real passenger supply (population>>3).
         uint avail = t->supplied[CT_PASSENGERS].old_max;
-        g_bus_pax = avail < 30 ? avail : 30;
-        t->supplied[CT_PASSENGERS].old_act += g_bus_pax;   // feeds GetPercentTransported()
+        b.pax = avail < 30 ? avail : 30;
+        t->supplied[CT_PASSENGERS].old_act += b.pax;   // feeds GetPercentTransported()
         return;
     }
     // DELIVER at the far town: fare ~ a simplified GetTransportedGoodsIncome.
-    uint dist = (uint)g_route_len;
-    Money fare = ((long long)dist * 200 * (long long)g_bus_pax * 3185) >> 21;
+    uint dist = (uint)b.len;
+    Money fare = ((long long)dist * 200 * (long long)b.pax * 3185) >> 21;
     if (fare < 1) fare = 1;
     CompanyID save = _current_company;
     _current_company = COMPANY_FIRST;
     SubtractMoneyFromCompany(CommandCost(EXPENSES_ROADVEH_REVENUE, -fare));  // negative = income
     _current_company = save;
-    g_bus_pax = 0;
+    b.pax = 0;
 }
 
 // Advance the bus; returns true only on a tick where it actually moved a sub-pixel,
@@ -513,48 +537,47 @@ static void r1_bus_arrive(void)
 // accumulator, so on-screen speed is constant regardless of frame rate or catch-up.
 // `mult` scales speed for fast-forward. Returns true only if the bus actually advanced.
 extern "C" unsigned long macsys_ticks(void);
-static unsigned long g_bus_last_ticks = 0, g_bus_accum = 0;
-static bool r1_bus_move(int mult)
+static bool r1_bus_move(R1Bus &b, int mult)
 {
-    if (g_route_len < 2) return false;
+    if (b.len < 2) return false;
     const unsigned long TICKS_PER_SUBSTEP = 2; // 60Hz ticks -> ~33ms/sub-step -> ~0.53s/tile
     unsigned long now = macsys_ticks();
-    if (g_bus_last_ticks == 0) g_bus_last_ticks = now;
-    g_bus_accum += (now - g_bus_last_ticks) * (unsigned long)(mult > 0 ? mult : 1);
-    g_bus_last_ticks = now;
+    if (b.last_ticks == 0) b.last_ticks = now;
+    b.accum += (now - b.last_ticks) * (unsigned long)(mult > 0 ? mult : 1);
+    b.last_ticks = now;
     // Clamp the backlog and cap the per-frame advance to ONE sub-step. An occasional heavy
     // frame (town-growth whole-map recomposite, ~130ms) would otherwise make the bus JUMP
     // several sub-steps at once to stay on real-time schedule (R1-67 "catches up every now
     // and then"). Instead we drain any backlog one sub-step per frame -> dead-steady motion,
     // at the cost of a tiny transient phase-lag that's invisible on a cosmetic ping-pong bus.
     const unsigned long MAX_BACKLOG = 4 * TICKS_PER_SUBSTEP;
-    if (g_bus_accum > MAX_BACKLOG) g_bus_accum = MAX_BACKLOG;
-    unsigned long substeps = g_bus_accum / TICKS_PER_SUBSTEP;
+    if (b.accum > MAX_BACKLOG) b.accum = MAX_BACKLOG;
+    unsigned long substeps = b.accum / TICKS_PER_SUBSTEP;
     if (substeps == 0) return false;
     substeps = 1;                                  // one sub-step per frame -> no visible jump
-    g_bus_accum -= TICKS_PER_SUBSTEP;              // keep the remainder -> steady average speed
+    b.accum -= TICKS_PER_SUBSTEP;                  // keep the remainder -> steady average speed
     for (unsigned long k = 0; k < substeps; k++) {
-        if (++g_bus_prog >= 16) {
-            g_bus_prog = 0;
-            g_bus_i += g_bus_dir;
-            if (g_bus_i >= g_route_len - 1) { g_bus_i = g_route_len - 1; g_bus_dir = -1; r1_bus_arrive(); }
-            else if (g_bus_i <= 0)          { g_bus_i = 0;              g_bus_dir = 1; r1_bus_arrive(); }
+        if (++b.prog >= 16) {
+            b.prog = 0;
+            b.i += b.dir;
+            if (b.i >= b.len - 1) { b.i = b.len - 1; b.dir = -1; r1_bus_arrive(b); }
+            else if (b.i <= 0)    { b.i = 0;         b.dir = 1; r1_bus_arrive(b); }
         }
     }
     return true;
 }
 
 // Interpolated world position + facing of the bus along its traced route.
-static bool r1_bus_worldpos(int *wx, int *wy, int *wz, Direction *dir)
+static bool r1_bus_worldpos(R1Bus &bus, int *wx, int *wy, int *wz, Direction *dir)
 {
-    if (g_route_len < 2) return false;
-    int ni = g_bus_i + g_bus_dir;
-    if (ni < 0 || ni >= g_route_len) return false;
-    TileIndex a = g_route[g_bus_i], b = g_route[ni];
+    if (bus.len < 2) return false;
+    int ni = bus.i + bus.dir;
+    if (ni < 0 || ni >= bus.len) return false;
+    TileIndex a = bus.route[bus.i], b = bus.route[ni];
     int ax = (int)TileX(a), ay = (int)TileY(a);
     int dx = (int)TileX(b) - ax, dy = (int)TileY(b) - ay;
-    *wx = ax * TILE_SIZE + TILE_SIZE / 2 + dx * g_bus_prog;
-    *wy = ay * TILE_SIZE + TILE_SIZE / 2 + dy * g_bus_prog;
+    *wx = ax * TILE_SIZE + TILE_SIZE / 2 + dx * bus.prog;
+    *wy = ay * TILE_SIZE + TILE_SIZE / 2 + dy * bus.prog;
     *wz = (int)TileHeight(a) * TILE_HEIGHT;
     *dir = (dx > 0) ? DIR_SW : (dx < 0) ? DIR_NE : (dy > 0) ? DIR_SE : DIR_NW;
     return true;
@@ -563,17 +586,16 @@ static bool r1_bus_worldpos(int *wx, int *wy, int *wz, Direction *dir)
 // R1-76: push the bus's route position onto the REAL pooled RoadVehicle (lazily created on
 // the first tick once the route exists). This replaces the raw-sprite hack with a genuine
 // pooled Vehicle object (m1_vehicle.cpp), the next rung after Town -> Company -> Vehicle.
-static void r1_update_vehicle(void)
+static void r1_update_vehicle(R1Bus &b)
 {
     int wx, wy, wz; Direction dir;
-    if (!r1_bus_worldpos(&wx, &wy, &wz, &dir)) return;
-    Vehicle *v = nullptr;
-    for (Vehicle *it : Vehicle::Iterate()) { v = it; break; }
-    if (v == nullptr) {
-        r1_make_roadvehicle((uint)g_route[g_bus_i], wx, wy, wz, (int)dir);
-        for (Vehicle *it : Vehicle::Iterate()) { v = it; break; }
-        if (v == nullptr) return;
+    if (!r1_bus_worldpos(b, &wx, &wy, &wz, &dir)) return;
+    if (b.v == nullptr) {   // lazily create THIS bus's own pooled puppet on first move
+        b.v = (Vehicle *)r1_make_roadvehicle((uint)b.route[b.i], wx, wy, wz, (int)dir);
+        if (b.v == nullptr) return;   // pool full
+        return;                       // sprite/pos already set by r1_make_roadvehicle
     }
+    Vehicle *v = b.v;
     v->x_pos = wx; v->y_pos = wy; v->z_pos = wz; v->direction = dir;
     v->sprite_cache.sprite_seq.Set((SpriteID)(0xCD4 + dir));
 }
@@ -591,15 +613,15 @@ void ViewportAddVehicles(DrawPixelInfo *)
 
 // Screen-centre of the bus for a given viewport (false if no route).
 static int g_pbx0 = 0, g_pby0 = 0, g_pbx1 = 0, g_pby1 = 0;  // previous bus screen rect
-static bool r1_bus_screen(const Viewport *vp, int *sxp, int *syp)
+static bool r1_bus_screen(R1Bus &bus, const Viewport *vp, int *sxp, int *syp)
 {
-    if (g_route_len < 2) return false;
-    int ni = g_bus_i + g_bus_dir; if (ni < 0 || ni >= g_route_len) return false;
-    TileIndex a = g_route[g_bus_i], b = g_route[ni];
+    if (bus.len < 2) return false;
+    int ni = bus.i + bus.dir; if (ni < 0 || ni >= bus.len) return false;
+    TileIndex a = bus.route[bus.i], b = bus.route[ni];
     int ax = (int)TileX(a), ay = (int)TileY(a);
     int dx = (int)TileX(b) - ax, dy = (int)TileY(b) - ay;
-    int wx = ax * TILE_SIZE + TILE_SIZE / 2 + dx * g_bus_prog;
-    int wy = ay * TILE_SIZE + TILE_SIZE / 2 + dy * g_bus_prog;
+    int wx = ax * TILE_SIZE + TILE_SIZE / 2 + dx * bus.prog;
+    int wy = ay * TILE_SIZE + TILE_SIZE / 2 + dy * bus.prog;
     int wz = (int)TileHeight(a) * TILE_HEIGHT;
     Point p = RemapCoords(wx, wy, wz);
     int z = (int)g_zoom;
@@ -616,7 +638,7 @@ extern "C" int r1_bus_draw(int scroll_x, int scroll_y, int *ox, int *oy, int *ow
     *ow = 0;
     Viewport vp; r1_make_viewport(scroll_x, scroll_y, &vp);
     int sxp, syp;
-    if (!r1_bus_screen(&vp, &sxp, &syp)) return 0;
+    if (!r1_bus_screen(g_bus[0], &vp, &sxp, &syp)) return 0;   // B2 non-merge path drives the primary bus
     const int M = 24;
     int x0 = sxp - M, y0 = syp - M, x1 = sxp + M, y1 = syp + M;
     if (g_pbx1 > g_pbx0) {   // union with the previous rect so the old sprite is erased
@@ -657,18 +679,16 @@ extern "C" int r1_bus_draw(int scroll_x, int scroll_y, int *ox, int *oy, int *ow
 // every 8th tick (which re-composited the entire zoomed map + re-laid every town-name
 // label ~4x/sec — by far the dominant recurring graphics cost, see
 // docs/graphics-acceleration-clamshell.md).
-static int  g_bvx0 = 0, g_bvy0 = 0, g_bvx1 = 0, g_bvy1 = 0; // previous bus virtual rect
-static bool g_bv_valid = false;
-static void r1_bus_mark_dirty(void)
+static void r1_bus_mark_dirty(R1Bus &bus)
 {
-    if (g_route_len < 2) return;
-    int ni = g_bus_i + g_bus_dir;
-    if (ni < 0 || ni >= g_route_len) return;
-    TileIndex a = g_route[g_bus_i], b = g_route[ni];
+    if (bus.len < 2) return;
+    int ni = bus.i + bus.dir;
+    if (ni < 0 || ni >= bus.len) return;
+    TileIndex a = bus.route[bus.i], b = bus.route[ni];
     int ax = (int)TileX(a), ay = (int)TileY(a);
     int dx = (int)TileX(b) - ax, dy = (int)TileY(b) - ay;
-    int wx = ax * TILE_SIZE + TILE_SIZE / 2 + dx * g_bus_prog;
-    int wy = ay * TILE_SIZE + TILE_SIZE / 2 + dy * g_bus_prog;
+    int wx = ax * TILE_SIZE + TILE_SIZE / 2 + dx * bus.prog;
+    int wy = ay * TILE_SIZE + TILE_SIZE / 2 + dy * bus.prog;
     int wz = (int)TileHeight(a) * TILE_HEIGHT;
 
     // World box around the bus, projected at every extreme corner so it bounds the
@@ -688,13 +708,13 @@ static void r1_bus_mark_dirty(void)
             }
 
     int ul = l, ut = t, ur = r, ub = bo; // union with previous frame's box -> erase old bus
-    if (g_bv_valid) {
-        if (g_bvx0 < ul) ul = g_bvx0;
-        if (g_bvy0 < ut) ut = g_bvy0;
-        if (g_bvx1 > ur) ur = g_bvx1;
-        if (g_bvy1 > ub) ub = g_bvy1;
+    if (bus.bv_valid) {
+        if (bus.bvx0 < ul) ul = bus.bvx0;
+        if (bus.bvy0 < ut) ut = bus.bvy0;
+        if (bus.bvx1 > ur) ur = bus.bvx1;
+        if (bus.bvy1 > ub) ub = bus.bvy1;
     }
-    g_bvx0 = l; g_bvy0 = t; g_bvx1 = r; g_bvy1 = bo; g_bv_valid = true;
+    bus.bvx0 = l; bus.bvy0 = t; bus.bvx1 = r; bus.bvy1 = bo; bus.bv_valid = true;
     MarkAllViewportsDirty(ul, ut, ur, ub);
 }
 
@@ -756,7 +776,10 @@ extern "C" void r1_tick(void)
     // variable frame/tick rate — R1-67), and repaint only its own region when it moves,
     // via the cheap native targeted-dirty (Step 1). Growth still repaints the whole map
     // via last_houses' MarkWholeScreenDirty above.
-    if (r1_bus_move(g_r1_fast ? 3 : 1)) { r1_update_vehicle(); r1_bus_mark_dirty(); }
+    // R1-78: drive the whole FLEET. Each bus advances on its own time-accumulator and dirties
+    // only its own small screen rect, so N buses cost N tiny targeted marks (no full recomposite).
+    for (uint bi = 0; bi < R1_NBUS; bi++)
+        if (r1_bus_move(g_bus[bi], g_r1_fast ? 3 : 1)) { r1_update_vehicle(g_bus[bi]); r1_bus_mark_dirty(g_bus[bi]); }
 
     // Throttled liveness log: prove on the sink that the clock ticks + town grows.
     // First call confirms the hook fires; then every ~128 ticks show the town
@@ -765,11 +788,11 @@ extern "C" void r1_tick(void)
     ++n;
     if (n == 1 || (n & 0x7F) == 0) {
         const Town *t0 = Town::GetIfValid(0);
-        ottd_log("R1: live tick=%u date=%d houses=%u pop=%u | bus prog=%d i=%d dir=%d",
+        ottd_log("R1: live tick=%u date=%d houses=%u pop=%u | bus0 prog=%d i=%d dir=%d len=%d",
                  n, (int)_date,
                  t0 ? (uint)t0->cache.num_houses : 0u,
                  t0 ? (uint)t0->cache.population : 0u,
-                 g_bus_prog, g_bus_i, g_bus_dir);
+                 g_bus[0].prog, g_bus[0].i, g_bus[0].dir, g_bus[0].len);
     }
 }
 extern DrawPixelInfo *_cur_dpi;
