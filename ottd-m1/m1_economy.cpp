@@ -27,10 +27,46 @@
 #include "date_func.h"        /* _cur_month */
 #include "currency.h"         /* CurrencySpec _currency_specs (R1-79 finance window) */
 #include "settings_type.h"    /* GameSettings::difficulty.initial_interest */
+#include "cargotype.h"        /* CargoSpec, SetupCargoForClimate (R1-80 real cargo) */
+#include "cargo_type.h"       /* CT_PASSENGERS, NUM_CARGO, CargoID */
+#include "landscape_type.h"   /* LT_TEMPERATE */
+#include "gfx_type.h"         /* SpriteID */
 
 #include "safeguards.h"
 
 extern GameSettings _settings_game;
+
+/* R1-80: newgrf_cargo.cpp isn't compiled; cargotype.cpp's CargoSpec::GetCargoIcon references
+ * GetCustomCargoSprite for GRF-overridden cargo icons. We draw no cargo icons, so a no-op (0 =
+ * "use the default sprite") is safe. */
+SpriteID GetCustomCargoSprite(const CargoSpec *) { return 0; }
+
+/* R1-80: real transported-goods income, copied from economy.cpp:977-1023 (that TU is the heavy
+ * station/linkgraph/subsidy cascade we don't compile). The NewGRF CBM_CARGO_PROFIT_CALC branch
+ * is DROPPED — our cargo never sets that callback, and keeping it would drag GetCargoCallback
+ * (newgrf_cargo.cpp). BigMulS is the file-local helper from economy.cpp:76. */
+static inline int32 BigMulS(const int32 a, const int32 b, const uint8 shift)
+{
+	return (int32)((int64)a * (int64)b >> shift);
+}
+
+Money GetTransportedGoodsIncome(uint num_pieces, uint dist, byte transit_days, CargoID cargo_type)
+{
+	const CargoSpec *cs = CargoSpec::Get(cargo_type);
+	if (!cs->IsValid()) return 0;
+
+	static const int MIN_TIME_FACTOR = 31;
+	static const int MAX_TIME_FACTOR = 255;
+
+	const int days1 = cs->transit_days[0];
+	const int days2 = cs->transit_days[1];
+	const int days_over_days1 = std::max(   transit_days - days1, 0);
+	const int days_over_days2 = std::max(days_over_days1 - days2, 0);
+
+	const int time_factor = std::max(MAX_TIME_FACTOR - days_over_days1 - days_over_days2, MIN_TIME_FACTOR);
+
+	return BigMulS(dist * time_factor * num_pieces, cs->current_payment, 21);
+}
 
 /* Real Economy/Prices — replace the fake `char _economy[4096]`/`char _price[2048]` deadpools
  * (guarded out of m1_deadpools.c under R1_MERGE). Plain PODs; economy.cpp (which also defines
@@ -109,4 +145,14 @@ extern "C" void r1_economy_startup(void)
 	_currency_specs[0] = CurrencySpec(1, "", CF_NOEURO, "\xC2\xA3", "", 0, STR_NULL);
 	/* Make the finance window's "Loan Interest" widget show 2% (it reads initial_interest). */
 	_settings_game.difficulty.initial_interest = 2;
+
+	/* R1-80: stand up the REAL cargo table (temperate climate) so GetTransportedGoodsIncome has
+	 * genuine per-cargo payment/transit params — replaces the R1-77 magic-number fare. We don't
+	 * run economy.cpp's StartupEconomy (which sets current_payment from inflation), so seed it
+	 * directly: no inflation => current_payment == initial_payment. */
+	SetupCargoForClimate(LT_TEMPERATE);
+	for (CargoID i = 0; i < NUM_CARGO; i++) {
+		CargoSpec *cs = CargoSpec::Get(i);
+		cs->current_payment = cs->initial_payment;
+	}
 }

@@ -68,7 +68,7 @@
 
 /* ---- C++ static-member / vtable storage (NOT globals in m1_deadpools.c) ---- */
 
-CargoSpec CargoSpec::array[NUM_CARGO];
+/* CargoSpec::array now REAL — the compiled cargotype.cpp owns it (R1-80). */
 /* RecursiveCommandCounter::_counter now REAL (command.cpp, build 7). */
 
 /* Out-of-line key virtuals -> emits vtable + typeinfo for SimpleCountedObject. */

@@ -50,7 +50,7 @@ void ReconsiderGameScriptLanguage() {}
 const IndustrySpec *GetIndustrySpec(IndustryType) { return nullptr; }
 void SortIndustryTypes() {}
 void BuildIndustriesLegend() {}
-void InitializeSortedCargoSpecs() {}
+/* InitializeSortedCargoSpecs now REAL — compiled cargotype.cpp owns it (R1-80). */
 void BuildContentTypeStringList() {}
 
 /* --- vehicle (newgrf_engine.h) — SCC_ENGINE_NAME only --- */

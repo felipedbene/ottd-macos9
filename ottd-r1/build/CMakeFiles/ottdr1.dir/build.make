@@ -145,6 +145,7 @@ ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/../ottd-b1/map.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/../ottd-b1/bitmath_func.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/b1_shims.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/b2_shims.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/cargotype.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/clear_cmd.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/date.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/dropdown.o

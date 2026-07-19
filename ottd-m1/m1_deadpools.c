@@ -64,7 +64,9 @@ char _group_pool[8192]         = {0};
                      char[] would bus-error the {CURRENCY_LONG} formatter on its null std::string prefix */
 char _currency_specs[8192]     = {0};   /* CurrencySpec[CURRENCY_END] */
 #endif
+#ifndef R1_MERGE  /* real std::vector _sorted_cargo_specs lives in cargotype.cpp (R1-80) */
 char _sorted_cargo_specs[64]   = {0};   /* std::vector (zeroed == empty) */
+#endif
 char _valid_searchpaths[64]    = {0};   /* std::vector (zeroed == empty) */
 const char _openttd_revision[] = "13.4";
 #endif

@@ -515,9 +515,13 @@ static void r1_bus_arrive(R1Bus &b)
         t->supplied[CT_PASSENGERS].old_act += b.pax;   // feeds GetPercentTransported()
         return;
     }
-    // DELIVER at the far town: fare ~ a simplified GetTransportedGoodsIncome.
+    // DELIVER at the far town. R1-80: the REAL GetTransportedGoodsIncome (m1_economy.cpp, using
+    // the real temperate CargoSpec[CT_PASSENGERS] payment/transit params) replaces the R1-77
+    // magic-number fare. dist = route length in tiles; transit_days ~ a quarter of that so
+    // longer routes take the mild time-factor penalty the real formula applies.
     uint dist = (uint)b.len;
-    Money fare = ((long long)dist * 200 * (long long)b.pax * 3185) >> 21;
+    byte transit_days = (byte)std::min<uint>(b.len / 4 + 1, 255);
+    Money fare = GetTransportedGoodsIncome(b.pax, dist, transit_days, CT_PASSENGERS);
     if (fare < 1) fare = 1;
     CompanyID save = _current_company;
     _current_company = COMPANY_FIRST;
