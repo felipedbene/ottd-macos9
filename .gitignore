@@ -2,6 +2,9 @@
 .DS_Store
 ._*
 
+# Editor / tooling local state
+.claude/
+
 # Build intermediates (regenerable by the toolchain; kept out to slim the repo).
 # Deployable outputs (*.APPL, *.pef, *.bin, *.ad) are intentionally NOT ignored.
 *.xcoff
