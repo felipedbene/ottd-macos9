@@ -155,6 +155,7 @@ ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_cmd_stubs.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_company.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_deadpools.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_economy.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_finance_gui.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_industry_draw.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_land_stubs.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_methods.o

@@ -195,7 +195,7 @@ void ShowFoundTownWindow() {}
 
 /* ---- void (args) ---- */
 void ShowCompany(CompanyID) {}
-void ShowCompanyFinances(CompanyID) {}
+/* ShowCompanyFinances is now REAL — the extracted CompanyFinancesWindow in m1_finance_gui.cpp (R1-79). */
 void ShowCompanyStations(CompanyID) {}
 void DrawCompanyIcon(CompanyID, int, int) {}
 void ShowLandInfo(TileIndex) {}

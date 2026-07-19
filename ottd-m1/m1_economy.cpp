@@ -25,8 +25,12 @@
 #include "company_func.h"     /* _current_company */
 #include "command_func.h"     /* CommandCost */
 #include "date_func.h"        /* _cur_month */
+#include "currency.h"         /* CurrencySpec _currency_specs (R1-79 finance window) */
+#include "settings_type.h"    /* GameSettings::difficulty.initial_interest */
 
 #include "safeguards.h"
+
+extern GameSettings _settings_game;
 
 /* Real Economy/Prices — replace the fake `char _economy[4096]`/`char _price[2048]` deadpools
  * (guarded out of m1_deadpools.c under R1_MERGE). Plain PODs; economy.cpp (which also defines
@@ -96,4 +100,13 @@ extern "C" void r1_economy_startup(void)
 	_economy.interest_rate    = 2;
 	_economy.max_loan         = 300000;
 	_price[PR_STATION_VALUE]  = 200;   /* -> a flat ~50/month property upkeep */
+
+	/* R1-79: seed the currency table the finance window's {CURRENCY_LONG} widgets format
+	 * against. GetGameSettings().locale.currency is 0, so slot 0 is what _currency resolves to.
+	 * rate=1 (money prints 1:1), "£" prefix, empty separator (FormatGenericCurrency falls back
+	 * to the loaded langpack separator). A typed CurrencySpec has valid empty std::strings, so
+	 * .c_str() is safe — the zeroed char[] deadpool would have bus-errored here. */
+	_currency_specs[0] = CurrencySpec(1, "", CF_NOEURO, "\xC2\xA3", "", 0, STR_NULL);
+	/* Make the finance window's "Loan Interest" widget show 2% (it reads initial_interest). */
+	_settings_game.difficulty.initial_interest = 2;
 }

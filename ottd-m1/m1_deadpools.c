@@ -60,7 +60,10 @@ char _global_string_params[4096] = {0};
 #ifdef R1_STRINGS
 char _engine_pool[8192]        = {0};
 char _group_pool[8192]         = {0};
+#ifndef R1_MERGE  /* real CurrencySpec _currency_specs[] lives in m1_finance_gui.cpp (R1-79); a zeroed
+                     char[] would bus-error the {CURRENCY_LONG} formatter on its null std::string prefix */
 char _currency_specs[8192]     = {0};   /* CurrencySpec[CURRENCY_END] */
+#endif
 char _sorted_cargo_specs[64]   = {0};   /* std::vector (zeroed == empty) */
 char _valid_searchpaths[64]    = {0};   /* std::vector (zeroed == empty) */
 const char _openttd_revision[] = "13.4";
