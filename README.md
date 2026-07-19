@@ -32,19 +32,36 @@ Underneath, the real headless engine (`ottd-m1`) runs the genuine game loop: the
 
 ## Screenshots
 
-> These are **offline render-pipeline previews**, not hardware captures — produced by the Python render simulators in `agent-compositor/` and `agent-tiles/` that reproduce the port's isometric tile math on the host. They were used to debug landscape geometry and sprite selection without burning expensive hardware round-trips. (Hardware-side results were verified live over VNC; captures aren't checked in.)
+**Real Mac OS 9 / PowerPC hardware** — the `ottd-r1` build running on the actual machine (captured over VNC).
+
+The full world with five live, named towns, a lake and a river, forests and industries — all rendered by OpenTTD's own `viewport.cpp` on PPC:
+
+![OpenTTD on Mac OS 9: full world with five named towns](docs/screenshots/r1-world-5-towns.png)
+
+The canonical OpenTTD toolbar plus a zoomed-in town (Peningley) — houses, roads, a stadium, and autumn trees:
+
+![OpenTTD on Mac OS 9: full toolbar and a zoomed-in town](docs/screenshots/r1-toolbar-town-closeup.png)
+
+A draggable in-game "Towns" window, drawn by the real `window.cpp` / `widget.cpp` stack (Year 1950 · 5 towns · population 3250):
+
+![OpenTTD on Mac OS 9: the Towns info window](docs/screenshots/r1-towns-window.jpg)
+
+<details>
+<summary><strong>Offline render-pipeline previews</strong> (host-side, used to debug geometry)</summary>
+
+These are **not** hardware captures — they come from the Python render simulators in `agent-compositor/` and `agent-tiles/`, which reproduce the port's isometric tile math on the host so landscape geometry and sprite selection could be debugged without burning hardware round-trips.
 
 Composited landscape scene (`agent-compositor/preview/scene.png`):
 
 ![Composited isometric landscape render](agent-compositor/preview/scene.png)
 
-A few of the individual tile sprites the renderer selects and projects (`agent-tiles/previews/`):
+Individual tile sprites the renderer selects and projects (`agent-tiles/previews/`):
 
 | Flat grass | Sloped grass | Water | Trees | Rocky |
 |:---:|:---:|:---:|:---:|:---:|
 | ![](agent-tiles/previews/grass_00_SLOPE_FLAT.png) | ![](agent-tiles/previews/grass_03_SLOPE_SW.png) | ![](agent-tiles/previews/water_flat.png) | ![](agent-tiles/previews/tree_0628.png) | ![](agent-tiles/previews/rocky_1_flat.png) |
 
-_To add real Mac OS 9 hardware screenshots, drop them in `docs/screenshots/` and link them here._
+</details>
 
 ---
 
