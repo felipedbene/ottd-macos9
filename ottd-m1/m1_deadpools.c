@@ -18,7 +18,9 @@
  * header-free C file so the char-array definitions don't collide with the real
  * `extern VehiclePool _vehicle_pool;` declarations in the OpenTTD headers.
  * Sized generously (> sizeof any Pool<> instance). */
+#ifndef R1_MERGE  /* real VehiclePool lives in m1_vehicle.cpp in the render-merge build */
 char _vehicle_pool[4096]    = {0};
+#endif
 char _link_graph_pool[4096] = {0};
 
 /* M1 build 6: town_cmd.cpp is compiled for real (the town monthly/yearly

@@ -139,4 +139,5 @@ template <> void GroundVehicle<RoadVehicle, VEH_ROAD>::CargoChanged() {}
  *      uncompiled depot.cpp / vehicle.cpp; explicitly instantiate here) ---- */
 template void *DepotPool::GetNew(size_t size);
 template void DepotPool::FreeItem(size_t index);
-template void VehiclePool::FreeItem(size_t index);
+/* VehiclePool::FreeItem removed — now emitted by INSTANTIATE_POOL_METHODS(Vehicle) in
+ * m1_vehicle.cpp (real _vehicle_pool). Keeping it here would duplicate -> ld segfault. */

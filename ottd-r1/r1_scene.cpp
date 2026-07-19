@@ -39,6 +39,12 @@
 #include "landscape_cmd.h"
 #include "company_type.h"
 #include "company_func.h"
+#include "company_base.h"      // Company::Get (live money in the info window)
+#include "vehicle_base.h"      // R1-76: the REAL Vehicle pool (Vehicle::Iterate, fields)
+
+// R1-76: stand up ONE real pooled RoadVehicle (defined in ottd-m1/m1_vehicle.cpp, which owns
+// the real VehiclePool + object, WITHOUT the heavy vehicle.cpp/roadveh_cmd.cpp).
+extern "C" void r1_make_roadvehicle(uint tile, int x, int y, int z, int dir);
 #include "command_func.h"
 #include "road_type.h"
 #include "road_map.h"
@@ -286,6 +292,15 @@ extern "C" void r1_build_world(void)
         int rx = r1_river_x(y);
         if (rx >= 1 && rx < (int)MapMaxX()) r1_hmap[y * R1_MAP + rx] = 0;
     }
+    // 2c) Ramp the outer ring of real tiles down to the void's height (0). The SE edge tiles
+    //     (x = MapMaxX()-1, y = MapMaxY()-1) read their W/S corners from the MakeVoid'd border
+    //     (height 0); where terrain there stood 2 steps up, GetTileSlope produced a non-canonical
+    //     steep (e.g. STEEP|N|E = 0x1C) that GetHighestSlopeCorner can't classify -> NOT_REACHED
+    //     at slope_func.h:137, plus the thin "blue" cliff sliver at the map edge. Forcing the
+    //     border to sea level BEFORE relaxation makes the interior ramp gently down to it (like
+    //     the lake/river carves above) so no 2-step drop survives. Verified: malformed 52 -> 0.
+    for (uint i = 0; i < MapMaxX(); i++) { r1_hmap[i] = 0; r1_hmap[(MapMaxY() - 1) * R1_MAP + i] = 0; }
+    for (uint j = 0; j < MapMaxY(); j++) { r1_hmap[j * R1_MAP + 0] = 0; r1_hmap[j * R1_MAP + MapMaxX() - 1] = 0; }
     // 3) relaxation: no tile more than 1 step above its lowest orthogonal neighbour,
     //    so every slope is gentle (single-step) -> clean slope sprites + buildable,
     //    and the pad edges smooth into the hills instead of forming cliffs.
@@ -486,22 +501,49 @@ static bool r1_bus_move(int mult)
     return true;
 }
 
-// Real ViewportAddVehicles (we removed the no-op stub): draw the bus at its
-// interpolated world position, facing its travel direction. Called inside the real
-// ViewportDoDraw, so AddSortableSpriteToDraw sorts it correctly over the road.
-void ViewportAddVehicles(DrawPixelInfo *)
+// Interpolated world position + facing of the bus along its traced route.
+static bool r1_bus_worldpos(int *wx, int *wy, int *wz, Direction *dir)
 {
-    if (g_route_len < 2) return;
+    if (g_route_len < 2) return false;
     int ni = g_bus_i + g_bus_dir;
-    if (ni < 0 || ni >= g_route_len) return;
+    if (ni < 0 || ni >= g_route_len) return false;
     TileIndex a = g_route[g_bus_i], b = g_route[ni];
     int ax = (int)TileX(a), ay = (int)TileY(a);
     int dx = (int)TileX(b) - ax, dy = (int)TileY(b) - ay;
-    int wx = ax * TILE_SIZE + TILE_SIZE / 2 + dx * g_bus_prog;
-    int wy = ay * TILE_SIZE + TILE_SIZE / 2 + dy * g_bus_prog;
-    int wz = (int)TileHeight(a) * TILE_HEIGHT;
-    Direction dir = (dx > 0) ? DIR_SW : (dx < 0) ? DIR_NE : (dy > 0) ? DIR_SE : DIR_NW;
-    AddSortableSpriteToDraw((SpriteID)(0xCD4 + dir), PAL_NONE, wx, wy, 4, 4, 6, wz, false, 0, 0, 0);
+    *wx = ax * TILE_SIZE + TILE_SIZE / 2 + dx * g_bus_prog;
+    *wy = ay * TILE_SIZE + TILE_SIZE / 2 + dy * g_bus_prog;
+    *wz = (int)TileHeight(a) * TILE_HEIGHT;
+    *dir = (dx > 0) ? DIR_SW : (dx < 0) ? DIR_NE : (dy > 0) ? DIR_SE : DIR_NW;
+    return true;
+}
+
+// R1-76: push the bus's route position onto the REAL pooled RoadVehicle (lazily created on
+// the first tick once the route exists). This replaces the raw-sprite hack with a genuine
+// pooled Vehicle object (m1_vehicle.cpp), the next rung after Town -> Company -> Vehicle.
+static void r1_update_vehicle(void)
+{
+    int wx, wy, wz; Direction dir;
+    if (!r1_bus_worldpos(&wx, &wy, &wz, &dir)) return;
+    Vehicle *v = nullptr;
+    for (Vehicle *it : Vehicle::Iterate()) { v = it; break; }
+    if (v == nullptr) {
+        r1_make_roadvehicle((uint)g_route[g_bus_i], wx, wy, wz, (int)dir);
+        for (Vehicle *it : Vehicle::Iterate()) { v = it; break; }
+        if (v == nullptr) return;
+    }
+    v->x_pos = wx; v->y_pos = wy; v->z_pos = wz; v->direction = dir;
+    v->sprite_cache.sprite_seq.Set((SpriteID)(0xCD4 + dir));
+}
+
+// R1-76: draw the REAL pooled vehicles. Called inside the real ViewportDoDraw, so each
+// vehicle's sprite is sorted correctly over the terrain/road by AddSortableSpriteToDraw.
+void ViewportAddVehicles(DrawPixelInfo *)
+{
+    for (const Vehicle *v : Vehicle::Iterate()) {
+        if (v->vehstatus & VS_HIDDEN) continue;
+        AddSortableSpriteToDraw(v->sprite_cache.sprite_seq.seq[0].sprite, PAL_NONE,
+            v->x_pos, v->y_pos, 4, 4, 6, v->z_pos, false, 0, 0, 0);
+    }
 }
 
 // Screen-centre of the bus for a given viewport (false if no route).
@@ -671,7 +713,7 @@ extern "C" void r1_tick(void)
     // variable frame/tick rate — R1-67), and repaint only its own region when it moves,
     // via the cheap native targeted-dirty (Step 1). Growth still repaints the whole map
     // via last_houses' MarkWholeScreenDirty above.
-    if (r1_bus_move(g_r1_fast ? 3 : 1)) r1_bus_mark_dirty();
+    if (r1_bus_move(g_r1_fast ? 3 : 1)) { r1_update_vehicle(); r1_bus_mark_dirty(); }
 
     // Throttled liveness log: prove on the sink that the clock ticks + town grows.
     // First call confirms the hook fires; then every ~128 ticks show the town
@@ -955,6 +997,10 @@ struct R1InfoWindow : Window {
         snprintf(buf, sizeof buf, "Towns:       %u", ntowns);
         DrawString(r.left + 8, r.right - 8, y, buf, TC_BLACK); y += 16;
         snprintf(buf, sizeof buf, "Population:   %u", totpop);
+        DrawString(r.left + 8, r.right - 8, y, buf, TC_BLACK); y += 16;
+        // R1-76: the REAL company balance (m1_company put COMPANY_FIRST up with 100000).
+        const Company *co = Company::GetIfValid(COMPANY_FIRST);
+        snprintf(buf, sizeof buf, "Money:      %ld", co ? (long)co->money : 0L);
         DrawString(r.left + 8, r.right - 8, y, buf, TC_BLACK);
     }
 
