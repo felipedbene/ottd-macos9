@@ -1,0 +1,4 @@
+/Users/felipe/ottd-macos9/ottd-thread-demo/build/CMakeFiles/ottddemo.dir
+/Users/felipe/ottd-macos9/ottd-thread-demo/build/CMakeFiles/ottddemo_APPL.dir
+/Users/felipe/ottd-macos9/ottd-thread-demo/build/CMakeFiles/edit_cache.dir
+/Users/felipe/ottd-macos9/ottd-thread-demo/build/CMakeFiles/rebuild_cache.dir

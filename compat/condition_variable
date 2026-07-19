@@ -1,0 +1,42 @@
+// Cooperative single-threaded <condition_variable> shim for Retro68.
+// In a single line of execution a classic CV would deadlock, so waits do NOT block
+// here: wait(pred) evaluates the predicate once and returns. Real cooperative
+// blocking (pump the event loop until predicate holds) is a later refinement;
+// this is enough to compile and to keep the non-blocking paths correct.
+#ifndef OTTD_COMPAT_CONDITION_VARIABLE
+#define OTTD_COMPAT_CONDITION_VARIABLE
+
+#include <chrono>
+#include <mutex>
+
+namespace std {
+
+enum class cv_status { no_timeout, timeout };
+
+class condition_variable {
+public:
+	condition_variable() = default;
+	condition_variable(const condition_variable &) = delete;
+	condition_variable &operator=(const condition_variable &) = delete;
+
+	void notify_one() noexcept {}
+	void notify_all() noexcept {}
+
+	void wait(unique_lock<mutex> &) {}
+	template <class Predicate>
+	void wait(unique_lock<mutex> &, Predicate pred) { while (!pred()) break; }
+
+	template <class Rep, class Period>
+	cv_status wait_for(unique_lock<mutex> &, const chrono::duration<Rep, Period> &) { return cv_status::timeout; }
+	template <class Rep, class Period, class Predicate>
+	bool wait_for(unique_lock<mutex> &, const chrono::duration<Rep, Period> &, Predicate pred) { return pred(); }
+
+	template <class Clock, class Duration>
+	cv_status wait_until(unique_lock<mutex> &, const chrono::time_point<Clock, Duration> &) { return cv_status::timeout; }
+	template <class Clock, class Duration, class Predicate>
+	bool wait_until(unique_lock<mutex> &, const chrono::time_point<Clock, Duration> &, Predicate pred) { return pred(); }
+};
+
+} // namespace std
+
+#endif // OTTD_COMPAT_CONDITION_VARIABLE

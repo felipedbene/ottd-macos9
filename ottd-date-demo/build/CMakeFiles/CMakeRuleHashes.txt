@@ -1,0 +1,4 @@
+# Hashes of file build rules.
+a4962fcb6989a29eead9aa107278b5d0 CMakeFiles/ottdmath_APPL
+d7ec631a6b90b81886d2a0abf5f7f63d ottdmath.bin
+3eb1145c07a2d7906fe6d427683ab3da ottdmath.pef

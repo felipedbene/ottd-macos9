@@ -1,0 +1,6 @@
+/Users/felipe/ottd-macos9/ottd-b2/build/CMakeFiles/ottdb2probe.dir
+/Users/felipe/ottd-macos9/ottd-b2/build/CMakeFiles/ottdb2probe_APPL.dir
+/Users/felipe/ottd-macos9/ottd-b2/build/CMakeFiles/ottdb2.dir
+/Users/felipe/ottd-macos9/ottd-b2/build/CMakeFiles/ottdb2_APPL.dir
+/Users/felipe/ottd-macos9/ottd-b2/build/CMakeFiles/edit_cache.dir
+/Users/felipe/ottd-macos9/ottd-b2/build/CMakeFiles/rebuild_cache.dir

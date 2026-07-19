@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.10)
+project(ottddemo CXX)
+add_application(ottddemo demo.cpp)
+target_compile_definitions(ottddemo PRIVATE NO_THREADS)
+target_include_directories(ottddemo PRIVATE /Users/felipe/ottd-macos9/compat /Users/felipe/ottd-macos9/openttd-13.4/src /Users/felipe/ottd-macos9/openttd-13.4/src/3rdparty /Users/felipe/ottd-macos9/Retro68/Console)
+target_link_libraries(ottddemo RetroConsole)

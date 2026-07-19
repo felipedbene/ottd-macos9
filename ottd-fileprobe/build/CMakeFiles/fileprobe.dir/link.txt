@@ -1,0 +1,1 @@
+/Users/felipe/ottd-macos9/Retro68-build/toolchain/bin/powerpc-apple-macos-g++ CMakeFiles/fileprobe.dir/main.cpp.obj -o fileprobe.xcoff  -lRetroConsole

@@ -1,0 +1,4 @@
+/Users/felipe/ottd-macos9/ottd-landscape/build/CMakeFiles/ottdland.dir
+/Users/felipe/ottd-macos9/ottd-landscape/build/CMakeFiles/ottdland_APPL.dir
+/Users/felipe/ottd-macos9/ottd-landscape/build/CMakeFiles/edit_cache.dir
+/Users/felipe/ottd-macos9/ottd-landscape/build/CMakeFiles/rebuild_cache.dir

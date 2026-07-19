@@ -1,0 +1,4 @@
+# Hashes of file build rules.
+8e4b3a50b01d0298636c83953ec78449 CMakeFiles/ottdgfx_APPL
+c5272aa60dbc121d671e3e56a7de4a6b ottdgfx.bin
+e79d053d74c63c0e43a9e9751036c059 ottdgfx.pef

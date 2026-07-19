@@ -1,0 +1,1 @@
+/Users/felipe/ottd-macos9/Retro68-build/toolchain/bin/powerpc-apple-macos-g++ CMakeFiles/ottdmath.dir/main.cpp.obj -o ottdmath.xcoff  /Users/felipe/ottd-macos9/ottd-date-demo/obj/ottd_calc.o /Users/felipe/ottd-macos9/ottd-date-demo/obj/math_func.o -lRetroConsole

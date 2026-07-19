@@ -1,0 +1,5 @@
+[ 25%] Linking CXX executable ottdb1.xcoff
+[ 50%] Built target ottdb1
+[ 75%] Generating ottdb1.pef
+[100%] Generating ottdb1.bin, ottdb1.APPL, ottdb1.ad, %ottdb1.ad
+[100%] Built target ottdb1_APPL

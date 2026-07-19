@@ -1,0 +1,7 @@
+[ 20%] Building CXX object CMakeFiles/ottdmap.dir/winmain.cpp.obj
+[ 40%] Building CXX object CMakeFiles/ottdmap.dir/maclog.cpp.obj
+[ 60%] Linking CXX executable ottdmap.xcoff
+[ 60%] Built target ottdmap
+[ 80%] Generating ottdmap.pef
+[100%] Generating ottdmap.bin, ottdmap.APPL, ottdmap.ad, %ottdmap.ad
+[100%] Built target ottdmap_APPL

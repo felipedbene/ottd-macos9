@@ -1,0 +1,27 @@
+In file included from /Users/felipe/ottd-macos9/openttd-13.4/src/network/core/address.h:13,
+                 from /Users/felipe/ottd-macos9/openttd-13.4/src/network/network_base.h:14,
+                 from /Users/felipe/ottd-macos9/openttd-13.4/src/company_cmd.cpp:20:
+/Users/felipe/ottd-macos9/openttd-13.4/src/network/core/tcp_listen.h: In static member function ‘static bool TCPListenHandler<Tsocket, Tfull_packet, Tban_packet>::ValidateClient(int, NetworkAddress&)’:
+/Users/felipe/ottd-macos9/openttd-13.4/src/network/core/os_abstraction.h:126:28: error: there are no arguments to ‘mac_closesocket’ that depend on a template parameter, so a declaration of ‘mac_closesocket’ must be available [-Wtemplate-body]
+  126 | #       define closesocket mac_closesocket
+      |                            ^~~~~~~~~~~~~~~
+/Users/felipe/ottd-macos9/openttd-13.4/src/network/core/tcp_listen.h:46:33: note: in expansion of macro ‘closesocket’
+   46 |                                 closesocket(s);
+      |                                 ^~~~~~~~~~~
+/Users/felipe/ottd-macos9/openttd-13.4/src/network/core/os_abstraction.h:126:28: note: (if you use ‘-fpermissive’, G++ will accept your code, but allowing the use of an undeclared name is deprecated)
+/Users/felipe/ottd-macos9/openttd-13.4/src/network/core/tcp_listen.h:46:33: note: in expansion of macro ‘closesocket’
+   46 |                                 closesocket(s);
+      |                                 ^~~~~~~~~~~
+/Users/felipe/ottd-macos9/openttd-13.4/src/network/core/os_abstraction.h:126:28: error: there are no arguments to ‘mac_closesocket’ that depend on a template parameter, so a declaration of ‘mac_closesocket’ must be available [-Wtemplate-body]
+  126 | #       define closesocket mac_closesocket
+      |                            ^~~~~~~~~~~~~~~
+/Users/felipe/ottd-macos9/openttd-13.4/src/network/core/tcp_listen.h:61:25: note: in expansion of macro ‘closesocket’
+   61 |                         closesocket(s);
+      |                         ^~~~~~~~~~~
+/Users/felipe/ottd-macos9/openttd-13.4/src/network/core/tcp_listen.h: In static member function ‘static void TCPListenHandler<Tsocket, Tfull_packet, Tban_packet>::CloseListeners()’:
+/Users/felipe/ottd-macos9/openttd-13.4/src/network/core/os_abstraction.h:126:28: error: there are no arguments to ‘mac_closesocket’ that depend on a template parameter, so a declaration of ‘mac_closesocket’ must be available [-Wtemplate-body]
+  126 | #       define closesocket mac_closesocket
+      |                            ^~~~~~~~~~~~~~~
+/Users/felipe/ottd-macos9/openttd-13.4/src/network/core/tcp_listen.h:167:25: note: in expansion of macro ‘closesocket’
+  167 |                         closesocket(s.second);
+      |                         ^~~~~~~~~~~

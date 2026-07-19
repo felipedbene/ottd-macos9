@@ -1,0 +1,4 @@
+/Users/felipe/ottd-macos9/ottd-fileprobe/build/CMakeFiles/fileprobe.dir
+/Users/felipe/ottd-macos9/ottd-fileprobe/build/CMakeFiles/fileprobe_APPL.dir
+/Users/felipe/ottd-macos9/ottd-fileprobe/build/CMakeFiles/edit_cache.dir
+/Users/felipe/ottd-macos9/ottd-fileprobe/build/CMakeFiles/rebuild_cache.dir

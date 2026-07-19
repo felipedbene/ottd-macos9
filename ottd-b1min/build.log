@@ -1,0 +1,7 @@
+[ 20%] Building CXX object CMakeFiles/ottdb1min.dir/winmain_min.cpp.obj
+[ 40%] Building CXX object CMakeFiles/ottdb1min.dir/maclog.cpp.obj
+[ 60%] Linking CXX executable ottdb1min.xcoff
+[ 60%] Built target ottdb1min
+[ 80%] Generating ottdb1min.pef
+[100%] Generating ottdb1min.bin, ottdb1min.APPL, ottdb1min.ad, %ottdb1min.ad
+[100%] Built target ottdb1min_APPL

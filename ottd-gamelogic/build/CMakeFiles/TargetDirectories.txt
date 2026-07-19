@@ -1,0 +1,4 @@
+/Users/felipe/ottd-macos9/ottd-gamelogic/build/CMakeFiles/ottdmap.dir
+/Users/felipe/ottd-macos9/ottd-gamelogic/build/CMakeFiles/ottdmap_APPL.dir
+/Users/felipe/ottd-macos9/ottd-gamelogic/build/CMakeFiles/edit_cache.dir
+/Users/felipe/ottd-macos9/ottd-gamelogic/build/CMakeFiles/rebuild_cache.dir

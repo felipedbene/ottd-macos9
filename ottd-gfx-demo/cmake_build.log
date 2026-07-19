@@ -1,0 +1,7 @@
+[ 20%] Building CXX object CMakeFiles/ottdgfx.dir/gfx.cpp.obj
+[ 40%] Building CXX object CMakeFiles/ottdgfx.dir/maclog.cpp.obj
+[ 60%] Linking CXX executable ottdgfx.xcoff
+[ 60%] Built target ottdgfx
+[ 80%] Generating ottdgfx.pef
+[100%] Generating ottdgfx.bin, ottdgfx.APPL, ottdgfx.ad, %ottdgfx.ad
+[100%] Built target ottdgfx_APPL

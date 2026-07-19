@@ -1,0 +1,4 @@
+/Users/felipe/ottd-macos9/hello-ppc/build/CMakeFiles/hello.dir
+/Users/felipe/ottd-macos9/hello-ppc/build/CMakeFiles/hello_APPL.dir
+/Users/felipe/ottd-macos9/hello-ppc/build/CMakeFiles/edit_cache.dir
+/Users/felipe/ottd-macos9/hello-ppc/build/CMakeFiles/rebuild_cache.dir

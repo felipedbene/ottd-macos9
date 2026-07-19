@@ -1,0 +1,58 @@
+// Cooperative single-threaded <thread> shim for Retro68 (classic Mac OS, no gthreads).
+// std::thread only ever exists here as a default-constructed placeholder member;
+// OpenTTD never actually spawns one (StartNewThread returns false under NO_THREADS),
+// so join/detach/joinable are no-ops. sleep_for is a TODO hook for a cooperative
+// yield (WaitNextEvent / Delay) -- a no-op for now, correctness comes with the event loop.
+#ifndef OTTD_COMPAT_THREAD
+#define OTTD_COMPAT_THREAD
+
+#include <chrono>
+
+/* Cooperative yield provided by the platform (macclassic_sys.c: WaitNextEvent loop
+ * that sleeps until the deadline, giving CPU back to the rest of classic Mac OS).
+ * Weak so TUs that never sleep still link without it; guarded call below. */
+extern "C" void ottd_cooperative_sleep_us(unsigned long us) __attribute__((weak));
+
+namespace std {
+
+class thread {
+public:
+	struct id {
+		bool operator==(const id &) const { return true; }
+		bool operator!=(const id &) const { return false; }
+		bool operator<(const id &) const { return false; }
+	};
+
+	thread() noexcept = default;
+	thread(thread &&) noexcept {}
+	thread &operator=(thread &&) noexcept { return *this; }
+	thread(const thread &) = delete;
+	thread &operator=(const thread &) = delete;
+	~thread() {}
+
+	bool joinable() const noexcept { return false; }
+	void join() {}
+	void detach() {}
+	id get_id() const noexcept { return {}; }
+	static unsigned hardware_concurrency() noexcept { return 1; }
+};
+
+namespace this_thread {
+	inline thread::id get_id() noexcept { return {}; }
+	inline void yield() noexcept {}
+	template <class Rep, class Period>
+	inline void sleep_for(const chrono::duration<Rep, Period> &d) {
+		/* Cooperative yield: hand the remaining frame time back to the OS via
+		 * WaitNextEvent instead of busy-spinning (Seam #1 of the port roadmap). */
+		if (ottd_cooperative_sleep_us != nullptr) {
+			long long us = chrono::duration_cast<chrono::microseconds>(d).count();
+			if (us > 0) ottd_cooperative_sleep_us((unsigned long)us);
+		}
+	}
+	template <class Clock, class Duration>
+	inline void sleep_until(const chrono::time_point<Clock, Duration> &) {}
+}
+
+} // namespace std
+
+#endif // OTTD_COMPAT_THREAD

@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.10)
+project(ottdmath CXX)
+add_application(ottdmath main.cpp)
+target_include_directories(ottdmath PRIVATE /Users/felipe/ottd-macos9/Retro68/Console)
+target_link_libraries(ottdmath ${CMAKE_CURRENT_SOURCE_DIR}/obj/ottd_calc.o ${CMAKE_CURRENT_SOURCE_DIR}/obj/math_func.o RetroConsole)

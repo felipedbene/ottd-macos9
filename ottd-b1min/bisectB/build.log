@@ -1,0 +1,7 @@
+[ 20%] Building CXX object CMakeFiles/bisectB.dir/winmain_B.cpp.obj
+[ 40%] Building CXX object CMakeFiles/bisectB.dir/maclog.cpp.obj
+[ 60%] Linking CXX executable bisectB.xcoff
+[ 60%] Built target bisectB
+[ 80%] Generating bisectB.pef
+[100%] Generating bisectB.bin, bisectB.APPL, bisectB.ad, %bisectB.ad
+[100%] Built target bisectB_APPL

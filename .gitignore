@@ -1,0 +1,20 @@
+# macOS
+.DS_Store
+._*
+
+# Build intermediates (regenerable by the toolchain; kept out to slim the repo).
+# Deployable outputs (*.APPL, *.pef, *.bin, *.ad) are intentionally NOT ignored.
+*.xcoff
+*.o
+*.obj
+*.d
+*.out
+
+# Excluded from this repo: cross-compiler toolchain and vendored upstream clones.
+# These are large and/or externally maintained; not part of the port work.
+/Retro68/
+/Retro68-build/
+/openttd/
+/openttd-13.4/
+/openttd-classic-port/
+/mac-minivnc/

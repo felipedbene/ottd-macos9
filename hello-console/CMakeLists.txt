@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.10)
+project(hello CXX)
+add_application(hello hello.cpp)
+target_include_directories(hello PRIVATE $ENV{R68}/Console)
+target_link_libraries(hello RetroConsole)

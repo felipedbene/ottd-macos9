@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.10)
+project(fileprobe CXX)
+add_application(fileprobe main.cpp)
+target_include_directories(fileprobe PRIVATE /Users/felipe/ottd-macos9/Retro68/Console)
+target_link_libraries(fileprobe RetroConsole)

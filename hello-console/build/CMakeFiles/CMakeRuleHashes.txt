@@ -1,0 +1,4 @@
+# Hashes of file build rules.
+800ec12c61d5035ff932d68527b37dc4 CMakeFiles/hello_APPL
+914be2601d74e47c7d851d50f3247077 hello.bin
+d947ab9a700cc2822b6de0ee5782cc8f hello.pef

@@ -1,0 +1,4 @@
+/Users/felipe/ottd-macos9/ottd-b1min/bisectB/build/CMakeFiles/bisectB.dir
+/Users/felipe/ottd-macos9/ottd-b1min/bisectB/build/CMakeFiles/bisectB_APPL.dir
+/Users/felipe/ottd-macos9/ottd-b1min/bisectB/build/CMakeFiles/edit_cache.dir
+/Users/felipe/ottd-macos9/ottd-b1min/bisectB/build/CMakeFiles/rebuild_cache.dir

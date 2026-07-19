@@ -1,0 +1,34 @@
+_current_text_dir
+_debug_driver_level
+_debug_map_level
+_debug_sprite_level
+_dirty_block_colour
+_networking
+_newgrf_debug_sprite_picker
+_resolutions
+_settings_client
+_settings_game
+_slope_to_sprite_offset
+_z_windows[abi:cxx11]
+.DrawOverlappedWindowForAll(int, int, int, int)
+.error(char const*, ...)
+.ErrorMessageData::~ErrorMessageData()
+.ErrorMessageData::ErrorMessageData(unsigned int, unsigned int, unsigned int, int, int, GRFFile const*, unsigned int, unsigned int const*)
+.ErrorMessageData::SetDParam(unsigned int, unsigned long long)
+.GetCharacterHeight(FontSize)
+.GetString(char*, unsigned int, char const*)
+.Layouter::GetBounds()
+.Layouter::GetCharAtPosition(int) const
+.Layouter::GetCharPosition(char const*) const
+.Layouter::Layouter(char const*, int, TextColour, FontSize)
+.MallocError(unsigned long)
+.NetworkUndrawChatMessage()
+.ottd_log
+.ReallocError(unsigned long)
+.ReInitAllWindows(bool)
+.ScheduleErrorMessage(ErrorMessageData const&)
+.ShowErrorMessage(unsigned int, unsigned int, WarningLevel, int, int, GRFFile const*, unsigned int, unsigned int const*)
+.UpdateAllVirtCoords()
+.usererror(char const*, ...)
+/Users/felipe/ottd-macos9/Retro68-build/toolchain/lib/gcc/powerpc-apple-macos/16.1.0/../../../../powerpc-apple-macos/bin/ld: b1_render.o:b1_render.cpp:(.pr+0x15c): more undefined references to `.ottd_log' follo
+FontCache::caches

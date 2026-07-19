@@ -1,0 +1,6 @@
+[ 25%] Building CXX object CMakeFiles/fileprobe.dir/main.cpp.obj
+[ 50%] Linking CXX executable fileprobe.xcoff
+[ 50%] Built target fileprobe
+[ 75%] Generating fileprobe.pef
+[100%] Generating fileprobe.bin, fileprobe.APPL, fileprobe.ad, %fileprobe.ad
+[100%] Built target fileprobe_APPL

@@ -1,0 +1,7 @@
+[ 20%] Building CXX object CMakeFiles/ottdland.dir/winmain.cpp.obj
+[ 40%] Building CXX object CMakeFiles/ottdland.dir/maclog.cpp.obj
+[ 60%] Linking CXX executable ottdland.xcoff
+[ 60%] Built target ottdland
+[ 80%] Generating ottdland.pef
+[100%] Generating ottdland.bin, ottdland.APPL, ottdland.ad, %ottdland.ad
+[100%] Built target ottdland_APPL

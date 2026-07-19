@@ -1,0 +1,70 @@
+// Cooperative single-threaded <mutex> shim for Retro68 (classic Mac OS, no gthreads).
+// The real libstdc++ here is built without threads, so std::mutex et al. don't exist.
+// On cooperative multitasking there is exactly one line of execution between
+// WaitNextEvent yields, so lock/unlock are genuine no-ops (not just stubs).
+#ifndef OTTD_COMPAT_MUTEX
+#define OTTD_COMPAT_MUTEX
+
+namespace std {
+
+struct mutex {
+	constexpr mutex() noexcept = default;
+	mutex(const mutex &) = delete;
+	mutex &operator=(const mutex &) = delete;
+	void lock() {}
+	bool try_lock() { return true; }
+	void unlock() {}
+};
+
+struct recursive_mutex {
+	recursive_mutex() = default;
+	recursive_mutex(const recursive_mutex &) = delete;
+	recursive_mutex &operator=(const recursive_mutex &) = delete;
+	void lock() {}
+	bool try_lock() { return true; }
+	void unlock() {}
+};
+
+struct adopt_lock_t { explicit adopt_lock_t() = default; };
+struct defer_lock_t { explicit defer_lock_t() = default; };
+struct try_to_lock_t { explicit try_to_lock_t() = default; };
+constexpr adopt_lock_t adopt_lock{};
+constexpr defer_lock_t defer_lock{};
+constexpr try_to_lock_t try_to_lock{};
+
+template <class Mutex>
+class lock_guard {
+public:
+	explicit lock_guard(Mutex &) {}
+	lock_guard(Mutex &, adopt_lock_t) {}
+	~lock_guard() {}
+	lock_guard(const lock_guard &) = delete;
+	lock_guard &operator=(const lock_guard &) = delete;
+};
+
+template <class Mutex>
+class unique_lock {
+	Mutex *m_ = nullptr;
+	bool owns_ = false;
+public:
+	unique_lock() noexcept = default;
+	explicit unique_lock(Mutex &m) : m_(&m), owns_(true) {}
+	unique_lock(Mutex &m, defer_lock_t) noexcept : m_(&m), owns_(false) {}
+	unique_lock(Mutex &m, adopt_lock_t) : m_(&m), owns_(true) {}
+	unique_lock(Mutex &m, try_to_lock_t) : m_(&m), owns_(true) {}
+	unique_lock(unique_lock &&o) noexcept : m_(o.m_), owns_(o.owns_) { o.m_ = nullptr; o.owns_ = false; }
+	unique_lock &operator=(unique_lock &&o) noexcept { m_ = o.m_; owns_ = o.owns_; o.m_ = nullptr; o.owns_ = false; return *this; }
+	unique_lock(const unique_lock &) = delete;
+	~unique_lock() {}
+	void lock() { owns_ = true; }
+	bool try_lock() { owns_ = true; return true; }
+	void unlock() { owns_ = false; }
+	bool owns_lock() const noexcept { return owns_; }
+	explicit operator bool() const noexcept { return owns_; }
+	Mutex *mutex() const noexcept { return m_; }
+	Mutex *release() noexcept { Mutex *r = m_; m_ = nullptr; owns_ = false; return r; }
+};
+
+} // namespace std
+
+#endif // OTTD_COMPAT_MUTEX

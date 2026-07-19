@@ -1,0 +1,4 @@
+/Users/felipe/ottd-macos9/ottd-gfx-demo/build/CMakeFiles/ottdgfx.dir
+/Users/felipe/ottd-macos9/ottd-gfx-demo/build/CMakeFiles/ottdgfx_APPL.dir
+/Users/felipe/ottd-macos9/ottd-gfx-demo/build/CMakeFiles/edit_cache.dir
+/Users/felipe/ottd-macos9/ottd-gfx-demo/build/CMakeFiles/rebuild_cache.dir
