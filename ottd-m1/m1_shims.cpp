@@ -128,7 +128,7 @@ void NetworkServerYearlyLoop() {}
 void CompaniesYearlyLoop() {}
 // TownsMonthlyLoop / TownsYearlyLoop: REAL now (town_cmd.cpp compiled, build 6).
 void IndustryDailyLoop() {}       // industry_cmd.cpp
-void IndustryMonthlyLoop() {}
+/* IndustryMonthlyLoop now REAL — the monthly production tick in m1_industry.cpp (R1-81). */
 void StationMonthlyLoop() {}      // station_cmd.cpp
 void SubsidyMonthlyLoop() {}      // subsidy.cpp
 void DisasterDailyLoop() {}       // disaster_vehicle.cpp

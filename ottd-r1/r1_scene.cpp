@@ -49,6 +49,10 @@
 // the real VehiclePool + object, WITHOUT the heavy vehicle.cpp/roadveh_cmd.cpp).
 extern "C" void *r1_make_roadvehicle(uint tile, int x, int y, int z, int dir);
 extern "C" void r1_economy_startup(void);   // m1_economy.cpp — seed interest/upkeep constants
+// R1-81: real pooled Industry (m1_industry.cpp owns the real IndustryPool, no industry_cmd.cpp).
+extern "C" unsigned r1_make_industry(unsigned tile, unsigned w, unsigned h, int type,
+                                     unsigned char produced, unsigned char rate);
+extern "C" unsigned long r1_industry_stockpile(void);   // total produced-cargo waiting (HUD)
 #include "command_func.h"
 #include "road_type.h"
 #include "road_map.h"
@@ -404,12 +408,22 @@ extern "C" void r1_build_world(void)
     uint nind = 0;
     for (uint i = 0; i < lengthof(R1_INDUSTRIES); i++) {
         const R1IndSite &s = R1_INDUSTRIES[i];
+        // R1-81: one REAL pooled Industry per site (m1_industry.cpp), producing a cargo into a
+        // real monthly stockpile (IndustryMonthlyLoop). Its tiles carry the real IndustryID so
+        // GetByTile resolves to it. Cargo is spec-free here (the stockpile ticks regardless of
+        // CargoSpec, which is seeded later in r1_economy_startup): power->coal, factory->goods.
+        TileIndex base = TileXY((uint)s.bx, (uint)s.by);
+        unsigned char cargo = (i == 0) ? (unsigned char)CT_COAL : (unsigned char)CT_GOODS;
+        unsigned char rate  = (i == 0) ? 12 : 8;
+        unsigned iid = r1_make_industry((unsigned)base, (unsigned)s.w, (unsigned)s.h,
+                                        (int)i, cargo, rate);
+        IndustryID id = (iid == 0xFFFF) ? (IndustryID)0 : (IndustryID)iid;
         for (int j = 0; j < s.n; j++) {
             int x = s.bx + s.tiles[j].dx, y = s.by + s.tiles[j].dy;
             if (x < 1 || x >= (int)MapMaxX() || y < 1 || y >= (int)MapMaxY()) continue;
             TileIndex t = TileXY((uint)x, (uint)y);
             if (IsTileType(t, MP_CLEAR) && r1_hmap[y * R1_MAP + x] == 0) {
-                MakeIndustry(t, (IndustryID)0, (IndustryGfx)s.tiles[j].gfx,
+                MakeIndustry(t, id, (IndustryGfx)s.tiles[j].gfx,
                              (uint8)r1_hash(x, y), WATER_CLASS_INVALID);
                 nind++;
             }
@@ -792,10 +806,11 @@ extern "C" void r1_tick(void)
     ++n;
     if (n == 1 || (n & 0x7F) == 0) {
         const Town *t0 = Town::GetIfValid(0);
-        ottd_log("R1: live tick=%u date=%d houses=%u pop=%u | bus0 prog=%d i=%d dir=%d len=%d",
+        ottd_log("R1: live tick=%u date=%d houses=%u pop=%u cargo=%lu | bus0 prog=%d i=%d dir=%d len=%d",
                  n, (int)_date,
                  t0 ? (uint)t0->cache.num_houses : 0u,
                  t0 ? (uint)t0->cache.population : 0u,
+                 r1_industry_stockpile(),
                  g_bus[0].prog, g_bus[0].i, g_bus[0].dir, g_bus[0].len);
     }
 }
@@ -1041,7 +1056,7 @@ static const NWidgetPart _r1_info_widgets[] = {
         NWidget(WWT_CLOSEBOX, COLOUR_GREY, R1IW_CLOSE),
         NWidget(WWT_CAPTION, COLOUR_GREY, R1IW_CAPTION), SetDataTip(STR_TOWN_DIRECTORY_CAPTION, 0),
     EndContainer(),
-    NWidget(WWT_PANEL, COLOUR_GREY, R1IW_PANEL), SetMinimalSize(210, 66), EndContainer(),
+    NWidget(WWT_PANEL, COLOUR_GREY, R1IW_PANEL), SetMinimalSize(210, 86), EndContainer(),
 };
 
 static WindowDesc _r1_info_desc(
@@ -1071,6 +1086,9 @@ struct R1InfoWindow : Window {
         // R1-76: the REAL company balance (m1_company put COMPANY_FIRST up with 100000).
         const Company *co = Company::GetIfValid(COMPANY_FIRST);
         snprintf(buf, sizeof buf, "Money:      %ld", co ? (long)co->money : 0L);
+        DrawString(r.left + 8, r.right - 8, y, buf, TC_BLACK); y += 16;
+        // R1-81: total real industry stockpile (produced_cargo_waiting), climbs each game-month.
+        snprintf(buf, sizeof buf, "Cargo:      %lu", r1_industry_stockpile());
         DrawString(r.left + 8, r.right - 8, y, buf, TC_BLACK);
     }
 

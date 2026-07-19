@@ -35,7 +35,9 @@ char _link_graph_pool[4096] = {0};
  * sized (>= sizeof the real type). Function stubs live in m1_town_stubs.cpp. */
 /* _company_pool is now the REAL CompanyPool, defined in m1_company.cpp (R1-62). */
 char _station_pool[8192]         = {0};
+#ifndef R1_MERGE  /* real IndustryPool _industry_pool lives in m1_industry.cpp (R1-81) */
 char _industry_pool[8192]        = {0};
+#endif
 char _object_pool[8192]          = {0};
 char _depot_pool[8192]           = {0};
 char _station_kdtree[4096]       = {0};
