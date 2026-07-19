@@ -1,0 +1,29 @@
+ottd-macos9 — OpenTTD ported to Mac OS 9 / PowerPC
+Copyright (c) 2026 Felipe De Bene
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License, version 2, as published by the
+Free Software Foundation. See the LICENSE file for the full license text.
+
+This work incorporates and derives from OpenTTD, and is a derivative work
+subject to OpenTTD's license. As a whole, this repository is licensed under
+GPL v2.
+
+
+THIRD-PARTY COMPONENTS
+======================
+
+OpenTTD
+  Copyright (c) OpenTTD Development Team
+  Licensed under the GNU General Public License, version 2.
+  https://www.openttd.org/  —  https://github.com/OpenTTD/OpenTTD
+  This port compiles, adapts, and links OpenTTD source; the compiled
+  applications here (*.APPL, *.pef, *.bin) contain OpenTTD code and are
+  therefore GPL v2. The full corresponding source lives in this repository
+  and in the upstream OpenTTD project.
+
+Retro68
+  Copyright (c) Wolfgang Thaller and contributors.
+  The GCC-based cross-compiler and runtime for classic 68k/PowerPC Mac OS
+  used to build this port. Retro68 is not vendored in this repository; see
+  https://github.com/autc04/Retro68 for its own licensing.

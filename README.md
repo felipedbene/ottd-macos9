@@ -4,7 +4,7 @@
 ![Arch](https://img.shields.io/badge/arch-PowerPC-blue)
 ![Toolchain](https://img.shields.io/badge/toolchain-Retro68-orange)
 ![Based on OpenTTD](https://img.shields.io/badge/based%20on-OpenTTD-green)
-![License](https://img.shields.io/badge/license-MIT%20%2F%20GPL--2.0-yellow)
+![License](https://img.shields.io/badge/license-GPL--2.0-yellow)
 ![Status](https://img.shields.io/badge/status-experimental-red)
 
 An experimental port of [OpenTTD](https://www.openttd.org/) to **classic Mac OS 8/9 running on PowerPC**, built with the [Retro68](https://github.com/autc04/Retro68) cross-compiler toolchain.
@@ -136,12 +136,11 @@ The `agent-*` Python simulators exist precisely because hardware round-trips are
 
 ## Licensing
 
-This project has a **dual-licensing reality**, because it ports GPL-licensed software:
+This repository is licensed under the **GNU General Public License, version 2** (see [`LICENSE`](LICENSE)).
 
-- The **original port code** authored here — the `compat/` shims, `build.sh` scripts, the `agent-*` Python tooling, and this documentation — is available under the **MIT License** (see [`LICENSE`](LICENSE)).
-- This repository also **incorporates and derives from [OpenTTD](https://www.openttd.org/)**, which is licensed under the **GNU General Public License, version 2**. That includes the OpenTTD translation units compiled into each subproject's `obj/`, the shim/scene files adapted from OpenTTD source, and the deployable binaries that link OpenTTD code.
+It is a **port of, and derivative work based on, [OpenTTD](https://www.openttd.org/)** — which is itself GPL v2. This project compiles OpenTTD translation units, adapts OpenTTD source into its shim/scene files, and links OpenTTD code into every deployable binary (`*.APPL`, `*.pef`, `*.bin`). Because the whole is a work based on the Program, GPL v2 governs the whole, and the port code is offered under the same terms. There is no proprietary or permissively-licensed carve-out.
 
-Where OpenTTD code and the port code combine into a single work (any compiled `.APPL`/`.pef` here, for instance), the **GPL v2 governs that combined work**. If you reuse pieces of this repository, treat anything touching OpenTTD as GPL v2 and the standalone original tooling as MIT.
+Attribution for OpenTTD and the Retro68 toolchain is in [`NOTICE`](NOTICE).
 
 ## Credits
 
