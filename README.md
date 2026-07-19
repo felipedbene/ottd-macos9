@@ -1,5 +1,12 @@
 # OpenTTD on Mac OS 9 / PowerPC
 
+![Platform](https://img.shields.io/badge/platform-Mac%20OS%208%2F9-lightgrey)
+![Arch](https://img.shields.io/badge/arch-PowerPC-blue)
+![Toolchain](https://img.shields.io/badge/toolchain-Retro68-orange)
+![Based on OpenTTD](https://img.shields.io/badge/based%20on-OpenTTD-green)
+![License](https://img.shields.io/badge/license-MIT%20%2F%20GPL--2.0-yellow)
+![Status](https://img.shields.io/badge/status-experimental-red)
+
 An experimental port of [OpenTTD](https://www.openttd.org/) to **classic Mac OS 8/9 running on PowerPC**, built with the [Retro68](https://github.com/autc04/Retro68) cross-compiler toolchain.
 
 This repository is the working scratch space for that port: a progression of small, individually bootable PPC applications that each prove one more piece of the game running on 25-year-old hardware — from a "hello world" up to the real OpenTTD engine simulating a growing town and the canonical game UI drawing itself, all in a single PowerPC binary.
@@ -20,6 +27,24 @@ The furthest-along build (`ottd-r1`) boots on Mac OS 9 / PPC and shows, all draw
 - a real player **company**, which lights up the build/finance/vehicle toolbar buttons.
 
 Underneath, the real headless engine (`ottd-m1`) runs the genuine game loop: the calendar advances, a real `Town` lives in the real `TownPool`, OpenTTD's command dispatch executes real tile commands, and `GrowTown()` grows a town to 100+ houses with a real road network and population accounting.
+
+---
+
+## Screenshots
+
+> These are **offline render-pipeline previews**, not hardware captures — produced by the Python render simulators in `agent-compositor/` and `agent-tiles/` that reproduce the port's isometric tile math on the host. They were used to debug landscape geometry and sprite selection without burning expensive hardware round-trips. (Hardware-side results were verified live over VNC; captures aren't checked in.)
+
+Composited landscape scene (`agent-compositor/preview/scene.png`):
+
+![Composited isometric landscape render](agent-compositor/preview/scene.png)
+
+A few of the individual tile sprites the renderer selects and projects (`agent-tiles/previews/`):
+
+| Flat grass | Sloped grass | Water | Trees | Rocky |
+|:---:|:---:|:---:|:---:|:---:|
+| ![](agent-tiles/previews/grass_00_SLOPE_FLAT.png) | ![](agent-tiles/previews/grass_03_SLOPE_SW.png) | ![](agent-tiles/previews/water_flat.png) | ![](agent-tiles/previews/tree_0628.png) | ![](agent-tiles/previews/rocky_1_flat.png) |
+
+_To add real Mac OS 9 hardware screenshots, drop them in `docs/screenshots/` and link them here._
 
 ---
 
@@ -91,6 +116,15 @@ A sampling of the Retro68 / XCOFF-PPC landmines this port had to work around —
 The `agent-*` Python simulators exist precisely because hardware round-trips are expensive — reproducing render/geometry bugs offline (via the real coordinate math) pointed straight at fixes without repeated deploys.
 
 ---
+
+## Licensing
+
+This project has a **dual-licensing reality**, because it ports GPL-licensed software:
+
+- The **original port code** authored here — the `compat/` shims, `build.sh` scripts, the `agent-*` Python tooling, and this documentation — is available under the **MIT License** (see [`LICENSE`](LICENSE)).
+- This repository also **incorporates and derives from [OpenTTD](https://www.openttd.org/)**, which is licensed under the **GNU General Public License, version 2**. That includes the OpenTTD translation units compiled into each subproject's `obj/`, the shim/scene files adapted from OpenTTD source, and the deployable binaries that link OpenTTD code.
+
+Where OpenTTD code and the port code combine into a single work (any compiled `.APPL`/`.pef` here, for instance), the **GPL v2 governs that combined work**. If you reuse pieces of this repository, treat anything touching OpenTTD as GPL v2 and the standalone original tooling as MIT.
 
 ## Credits
 
