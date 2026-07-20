@@ -168,6 +168,7 @@ ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_shims.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_strings_stubs.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_text_stubs.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_toolbar_stubs.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_town_directory_gui.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_town_stubs.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_vehicle.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_viewport_stubs.o

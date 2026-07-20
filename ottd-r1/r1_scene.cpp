@@ -1059,9 +1059,12 @@ static const NWidgetPart _r1_info_widgets[] = {
     NWidget(WWT_PANEL, COLOUR_GREY, R1IW_PANEL), SetMinimalSize(210, 86), EndContainer(),
 };
 
+// R1-82: the info HUD moves OFF WC_TOWN_DIRECTORY (was squatting it) to WC_NONE, so the toolbar
+// Town button's real ShowTownDirectory (m1_town_directory_gui.cpp) opens the genuine town list
+// instead of just refocusing this HUD. The HUD (year/towns/pop/money/cargo) stays as a boot panel.
 static WindowDesc _r1_info_desc(
     WDP_CENTER, nullptr, 0, 0,
-    WC_TOWN_DIRECTORY, WC_NONE, 0,
+    WC_NONE, WC_NONE, 0,
     _r1_info_widgets, lengthof(_r1_info_widgets), nullptr);
 
 struct R1InfoWindow : Window {

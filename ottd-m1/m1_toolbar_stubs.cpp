@@ -167,7 +167,7 @@ void ShowMusicWindow() {}
 void ShowGameSettings() {}
 void AskExitToGameMenu() {}
 void ShowSubsidiesList() {}
-void ShowTownDirectory() {}
+/* ShowTownDirectory is now REAL — the extracted TownDirectoryWindow in m1_town_directory_gui.cpp (R1-82). */
 void ShowAIConfigWindow() {}
 void ShowGSConfigWindow() {}
 void ShowMessageHistory() {}
