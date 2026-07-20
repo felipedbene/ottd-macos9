@@ -34,7 +34,9 @@ char _link_graph_pool[4096] = {0};
  * `extern <Type> _sym;` declarations without pulling those types. Generously
  * sized (>= sizeof the real type). Function stubs live in m1_town_stubs.cpp. */
 /* _company_pool is now the REAL CompanyPool, defined in m1_company.cpp (R1-62). */
+#ifndef R1_MERGE  /* real StationPool _station_pool lives in m1_station.cpp (R1-83) */
 char _station_pool[8192]         = {0};
+#endif
 #ifndef R1_MERGE  /* real IndustryPool _industry_pool lives in m1_industry.cpp (R1-81) */
 char _industry_pool[8192]        = {0};
 #endif

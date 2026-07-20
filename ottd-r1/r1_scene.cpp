@@ -53,6 +53,10 @@ extern "C" void r1_economy_startup(void);   // m1_economy.cpp — seed interest/
 extern "C" unsigned r1_make_industry(unsigned tile, unsigned w, unsigned h, int type,
                                      unsigned char produced, unsigned char rate);
 extern "C" unsigned long r1_industry_stockpile(void);   // total produced-cargo waiting (HUD)
+// R1-83: real pooled Station+RoadStop (m1_station.cpp owns the real StationPool, no station_cmd.cpp).
+extern "C" void r1_make_town_station(unsigned townid, unsigned tile);
+extern "C" void r1_station_pickup(unsigned townid, unsigned pax);
+extern "C" unsigned r1_station_count(void);
 #include "command_func.h"
 #include "road_type.h"
 #include "road_map.h"
@@ -395,6 +399,10 @@ extern "C" void r1_build_world(void)
         Command<CMD_TOWN_GROWTH_RATE>::Do(DC_EXEC, (TownID)t->index, (uint16)80);  // slow: rare full-screen repaints -> no stutter (towns already sizeable from the seed)
         founded++;
     }
+    // R1-83: one REAL pooled Station (+ RoadStop) per town, keyed by TownID. INVISIBLE (no
+    // MP_STATION tile), so nothing draws — the bus records its pickup on the real Station's
+    // goods[CT_PASSENGERS] (r1_bus_arrive) instead of only reading Town::supplied.
+    for (const Town *t : Town::Iterate()) r1_make_town_station((unsigned)t->index, (unsigned)t->xy);
     _current_company = OWNER_NONE;
     g_live = true;   // the render loop now ticks the engine each frame (r1_tick)
     g_full_dirty = true;  // force the first full frame to draw
@@ -527,6 +535,8 @@ static void r1_bus_arrive(R1Bus &b)
         uint avail = t->supplied[CT_PASSENGERS].old_max;
         b.pax = avail < 30 ? avail : 30;
         t->supplied[CT_PASSENGERS].old_act += b.pax;   // feeds GetPercentTransported()
+        // R1-83: record the pickup on the town's REAL pooled Station (goods[CT_PASSENGERS]).
+        r1_station_pickup((unsigned)t->index, b.pax);
         return;
     }
     // DELIVER at the far town. R1-80: the REAL GetTransportedGoodsIncome (m1_economy.cpp, using
@@ -1056,7 +1066,7 @@ static const NWidgetPart _r1_info_widgets[] = {
         NWidget(WWT_CLOSEBOX, COLOUR_GREY, R1IW_CLOSE),
         NWidget(WWT_CAPTION, COLOUR_GREY, R1IW_CAPTION), SetDataTip(STR_TOWN_DIRECTORY_CAPTION, 0),
     EndContainer(),
-    NWidget(WWT_PANEL, COLOUR_GREY, R1IW_PANEL), SetMinimalSize(210, 86), EndContainer(),
+    NWidget(WWT_PANEL, COLOUR_GREY, R1IW_PANEL), SetMinimalSize(210, 102), EndContainer(),
 };
 
 // R1-82: the info HUD moves OFF WC_TOWN_DIRECTORY (was squatting it) to WC_NONE, so the toolbar
@@ -1092,6 +1102,9 @@ struct R1InfoWindow : Window {
         DrawString(r.left + 8, r.right - 8, y, buf, TC_BLACK); y += 16;
         // R1-81: total real industry stockpile (produced_cargo_waiting), climbs each game-month.
         snprintf(buf, sizeof buf, "Cargo:      %lu", r1_industry_stockpile());
+        DrawString(r.left + 8, r.right - 8, y, buf, TC_BLACK); y += 16;
+        // R1-83: number of real pooled Station objects (one per town).
+        snprintf(buf, sizeof buf, "Stations:   %u", r1_station_count());
         DrawString(r.left + 8, r.right - 8, y, buf, TC_BLACK);
     }
 
