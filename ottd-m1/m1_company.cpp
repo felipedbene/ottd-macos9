@@ -84,6 +84,11 @@ void r1_make_company()
 	_company_colours[c->index] = (Colours)c->colour;
 	c->money = c->current_loan = 100000;    /* a starting balance */
 	c->inaugurated_year = 1950;
+	/* R1-85: give the company a real NAME + president. Without a custom name, {COMPANY} resolves
+	 * via name_1/name_2 town-name generation (unwired here) and prints "(undefined string)" — as
+	 * seen in the finance-window caption on HW. A non-empty custom name string is used directly. */
+	c->name           = "Clamshell Transport";
+	c->president_name = "Felipe";
 	c->avail_railtypes = (RailTypes)0;
 	c->avail_roadtypes = (RoadTypes)0;
 

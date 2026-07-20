@@ -49,19 +49,34 @@ INSTANTIATE_POOL_METHODS(Industry)
 Industry::~Industry() {}
 /* static */ void Industry::PostDestructor(size_t) {}
 
-/* The REAL monthly production tick (replaces the m1_shims.cpp no-op; date.cpp already calls it).
- * Spec-free by design — hardcoded on the object, so it never touches the stubbed GetIndustrySpec.
- * Each produced cargo's stockpile grows by its production_rate, clamped to the uint16 field max. */
-void IndustryMonthlyLoop()
+/* The REAL production tick. R1-85: moved to the DAILY loop (was monthly) — days roll ~30x more
+ * often than months (DAY_TICKS=74 vs ~2220/month), so the stockpile climbs visibly within a
+ * session instead of sitting at ~0 until the first month rolls over. Spec-free (hardcoded on the
+ * object, never touches the stubbed GetIndustrySpec): each produced cargo grows by production_rate
+ * per day, clamped to the uint16 field max. Nothing consumes it yet (no station delivery of
+ * industry cargo), so it accumulates toward the cap — fine for a production demo. date.cpp's
+ * OnNewDay already calls this (its m1_shims stub is removed). */
+void IndustryDailyLoop()
 {
 	for (Industry *ind : Industry::Iterate()) {
 		for (size_t j = 0; j < INDUSTRY_NUM_OUTPUTS; j++) {
 			if (ind->produced_cargo[j] == CT_INVALID) continue;
-			uint16 add = ind->production_rate[j];
-			ind->last_month_production[j] = add;
-			ind->this_month_production[j] = add;
-			uint32 stock = (uint32)ind->produced_cargo_waiting[j] + add;
+			uint16 rate = ind->production_rate[j];
+			uint32 stock = (uint32)ind->produced_cargo_waiting[j] + rate;
 			ind->produced_cargo_waiting[j] = (uint16)(stock > 0xFFFF ? 0xFFFF : stock);
+			uint32 mprod = (uint32)ind->this_month_production[j] + rate;
+			ind->this_month_production[j] = (uint16)(mprod > 0xFFFF ? 0xFFFF : mprod);
+		}
+	}
+}
+
+/* Monthly: roll this-month's production total into last-month and reset (real OpenTTD stat). */
+void IndustryMonthlyLoop()
+{
+	for (Industry *ind : Industry::Iterate()) {
+		for (size_t j = 0; j < INDUSTRY_NUM_OUTPUTS; j++) {
+			ind->last_month_production[j] = ind->this_month_production[j];
+			ind->this_month_production[j] = 0;
 		}
 	}
 }
@@ -86,8 +101,16 @@ extern "C" unsigned r1_make_industry(unsigned tile, unsigned w, unsigned h, int 
 	for (size_t j = 0; j < INDUSTRY_NUM_INPUTS;  j++) { ind->accepts_cargo[j]  = CT_INVALID; }
 	ind->produced_cargo[0]  = (CargoID)produced;
 	ind->production_rate[0] = rate;
+	ind->produced_cargo_waiting[0] = (uint16)(rate * 2);   /* seed so Cargo is non-zero immediately */
 	Industry::IncIndustryTypeCount((IndustryType)type);
 	return (unsigned)ind->index;
+}
+
+/* Number of real Industry objects in the pool (diagnostic: distinguishes "no industries created"
+ * from "industries exist but production stuck" when Cargo reads 0 on HW). */
+extern "C" unsigned r1_industry_count(void)
+{
+	return (unsigned)Industry::GetNumItems();
 }
 
 /* Total produced-cargo stockpile across all industries — for the info-window HUD readout so the

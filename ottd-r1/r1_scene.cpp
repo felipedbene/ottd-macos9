@@ -53,6 +53,7 @@ extern "C" void r1_economy_startup(void);   // m1_economy.cpp — seed interest/
 extern "C" unsigned r1_make_industry(unsigned tile, unsigned w, unsigned h, int type,
                                      unsigned char produced, unsigned char rate);
 extern "C" unsigned long r1_industry_stockpile(void);   // total produced-cargo waiting (HUD)
+extern "C" unsigned r1_industry_count(void);            // # industries in the pool (diagnostic)
 // R1-83: real pooled Station+RoadStop (m1_station.cpp owns the real StationPool, no station_cmd.cpp).
 extern "C" void r1_make_town_station(unsigned townid, unsigned tile);
 extern "C" void r1_station_pickup(unsigned townid, unsigned pax);
@@ -816,12 +817,12 @@ extern "C" void r1_tick(void)
     ++n;
     if (n == 1 || (n & 0x7F) == 0) {
         const Town *t0 = Town::GetIfValid(0);
-        ottd_log("R1: live tick=%u date=%d houses=%u pop=%u cargo=%lu | bus0 prog=%d i=%d dir=%d len=%d",
-                 n, (int)_date,
+        ottd_log("R1: live tick=%u date=%d mon=%d houses=%u pop=%u ind=%u cargo=%lu stations=%u | bus0 i=%d dir=%d len=%d",
+                 n, (int)_date, (int)_cur_month,
                  t0 ? (uint)t0->cache.num_houses : 0u,
                  t0 ? (uint)t0->cache.population : 0u,
-                 r1_industry_stockpile(),
-                 g_bus[0].prog, g_bus[0].i, g_bus[0].dir, g_bus[0].len);
+                 r1_industry_count(), r1_industry_stockpile(), r1_station_count(),
+                 g_bus[0].i, g_bus[0].dir, g_bus[0].len);
     }
 }
 extern DrawPixelInfo *_cur_dpi;
