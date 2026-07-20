@@ -34,6 +34,10 @@ Underneath, the real headless engine (`ottd-m1`) runs the genuine game loop: the
 
 **Real Mac OS 9 / PowerPC hardware** — the `ottd-r1` build running on the actual machine (captured over VNC).
 
+A real, moving economy: OpenTTD's own `CompanyFinancesWindow` — company "Clamshell Transport", pound-sterling balance, categorized revenue/expenses (loan interest, upkeep), max loan — over the live world, with a stats HUD (population, company money, industry cargo stockpile, stations). Real pooled `Company`, `Vehicle`, `Industry` and `Station` objects drive it, no fakes:
+
+![OpenTTD on Mac OS 9: the real finance window and a live economy](docs/screenshots/r1-finances-economy.png)
+
 The full world with five live, named towns, a lake and a river, forests and industries — all rendered by OpenTTD's own `viewport.cpp` on PPC:
 
 ![OpenTTD on Mac OS 9: full world with five named towns](docs/screenshots/r1-world-5-towns.png)
