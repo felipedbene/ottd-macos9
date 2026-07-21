@@ -823,6 +823,19 @@ extern "C" void r1_tick(void)
                  t0 ? (uint)t0->cache.population : 0u,
                  r1_industry_count(), r1_industry_stockpile(), r1_station_count(),
                  g_bus[0].i, g_bus[0].dir, g_bus[0].len);
+        // R1-88 money reconciliation: the ONLY writer (SubtractMoneyFromAnyCompany) does
+        // money -= cost AND yearly_expenses[0][type] += cost in lockstep, so money MUST equal
+        // 100000 - Σ yearly_expenses[0][*]. If money != expect below, a hidden writer exists;
+        // if it matches, the on-screen finance numbers were just misread through window overlap.
+        const Company *co = Company::GetIfValid(COMPANY_FIRST);
+        if (co != nullptr) {
+            long long sum = 0;
+            for (int e = 0; e < EXPENSES_END; e++) sum += (long long)co->yearly_expenses[0][e];
+            long long rev = -(long long)co->yearly_expenses[0][EXPENSES_ROADVEH_REVENUE];
+            ottd_log("R1 FIN: money=%ld loan=%ld rev=%ld yexp_sum=%ld expect(100000-sum)=%ld",
+                     (long)co->money, (long)co->current_loan, (long)rev,
+                     (long)sum, (long)(100000 - sum));
+        }
     }
 }
 extern DrawPixelInfo *_cur_dpi;
