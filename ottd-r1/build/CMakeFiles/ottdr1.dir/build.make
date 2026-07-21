@@ -154,9 +154,11 @@ ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/gfx_layout.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/landscape.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_cmd_stubs.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_company.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_company_gui.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_deadpools.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_economy.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_finance_gui.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_graph_gui.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_industry.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_industry_draw.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_land_stubs.o
@@ -166,12 +168,14 @@ ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_profiling_stub.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_road_stubs.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_shims.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_station.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_station_gui.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_strings_stubs.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_text_stubs.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_toolbar_stubs.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_town_directory_gui.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_town_stubs.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_vehicle.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_vehicle_list_gui.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_viewport_stubs.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_water_draw.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_window_stubs.o

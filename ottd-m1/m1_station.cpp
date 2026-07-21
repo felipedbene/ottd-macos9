@@ -120,6 +120,11 @@ extern "C" void r1_make_town_station(unsigned townid, unsigned tile)
 	st->town       = Town::GetIfValid((TownID)townid);
 	st->facilities = FACIL_BUS_STOP;
 	st->build_date = 0;
+	/* R1-86: give the station a real name so the station-list window's {STATION} renders the town
+	 * name instead of "(undefined string)". STR_SV_STNAME = "{STRING1}" resolves via the handler's
+	 * args {STR_TOWN_NAME, town->index, st->index} → the town's name (the {TOWN} shim is wired).
+	 * No UpdateVirtCoord / sign / kdtree needed — the draw path reads string_id + town only. */
+	st->string_id  = STR_SV_STNAME;
 	if (RoadStop::CanAllocateItem()) {
 		RoadStop *rs = new RoadStop((TileIndex)tile);
 		st->bus_stops = rs;

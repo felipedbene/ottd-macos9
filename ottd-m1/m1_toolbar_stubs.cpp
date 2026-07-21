@@ -162,7 +162,7 @@ void ShowClientList() {}
 void ShowAboutWindow() {}
 void ShowCheatWindow() {}
 void ShowGameOptions() {}
-void ShowIncomeGraph() {}
+/* ShowIncomeGraph is now REAL — m1_graph_gui.cpp (R1-86). */
 void ShowMusicWindow() {}
 void ShowGameSettings() {}
 void AskExitToGameMenu() {}
@@ -184,7 +184,7 @@ void ShowBuildIndustryWindow() {}
 void ShowDeliveredCargoGraph() {}
 void ShowSpriteAlignerWindow() {}
 void ShowTransparencyToolbar() {}
-void ShowOperatingProfitGraph() {}
+/* ShowOperatingProfitGraph is now REAL — m1_graph_gui.cpp (R1-86). */
 void ShowIndustryCargoesWindow() {}
 void ShowPerformanceLeagueTable() {}
 void ShowPerformanceHistoryGraph() {}
@@ -194,9 +194,9 @@ void CheckBlitter() {}
 void ShowFoundTownWindow() {}
 
 /* ---- void (args) ---- */
-void ShowCompany(CompanyID) {}
+/* ShowCompany is now REAL — m1_company_gui.cpp (R1-86). */
 /* ShowCompanyFinances is now REAL — the extracted CompanyFinancesWindow in m1_finance_gui.cpp (R1-79). */
-void ShowCompanyStations(CompanyID) {}
+/* ShowCompanyStations is now REAL — m1_station_gui.cpp (R1-86). */
 void DrawCompanyIcon(CompanyID, int, int) {}
 void ShowLandInfo(TileIndex) {}
 void ShowGoalsList(CompanyID) {}
@@ -209,7 +209,7 @@ void ShowSaveLoadDialog(AbstractFileType, SaveLoadOperation) {}
 void NetworkServerDoMove(ClientID, CompanyID) {}
 void NetworkClientRequestMove(CompanyID, const std::string &) {}
 void ShowScriptLeagueTable(LeagueTableID) {}
-void ShowVehicleListWindow(CompanyID, VehicleType) {}
+/* ShowVehicleListWindow is now REAL — m1_vehicle_list_gui.cpp (R1-86). */
 void ShowExtraViewportWindow(TileIndex) {}
 void MakeScreenshotWithConfirm(ScreenshotType) {}
 void SndPlayFx(SoundID) {}

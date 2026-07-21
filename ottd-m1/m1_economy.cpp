@@ -31,10 +31,14 @@
 #include "cargo_type.h"       /* CT_PASSENGERS, NUM_CARGO, CargoID */
 #include "landscape_type.h"   /* LT_TEMPERATE */
 #include "gfx_type.h"         /* SpriteID */
+#include "window_func.h"      /* SetWindowDirty (R1-86 graph history feeder) */
+#include "window_type.h"      /* WC_OPERATING_PROFIT / WC_INCOME_GRAPH */
+#include <algorithm>          /* std::copy_backward (R1-86 graph history feeder) */
 
 #include "safeguards.h"
 
-extern GameSettings _settings_game;
+extern GameSettings   _settings_game;
+extern ClientSettings _settings_client;   /* gui.graph_line_thickness (R1-86 graph) */
 
 /* R1-80: newgrf_cargo.cpp isn't compiled; cargotype.cpp's CargoSpec::GetCargoIcon references
  * GetCustomCargoSprite for GRF-overridden cargo icons. We draw no cargo icons, so a no-op (0 =
@@ -127,6 +131,23 @@ void CompaniesMonthlyLoop()
 		SubtractMoneyFromCompany(CommandCost(EXPENSES_OTHER, _price[PR_STATION_VALUE] >> 2));
 		_current_company = save;
 	}
+
+	/* R1-86: quarterly history roll so the operating-profit / income graphs have data. Mirrors
+	 * economy.cpp's CompaniesGenStatistics (economy.cpp:692-701): every 3rd month, snapshot the
+	 * quarter's cur_economy into old_economy[0] and reset. UpdateCompanyRatingAndValue is dropped
+	 * (drags station/score machinery; the operating-profit/income graphs read only income+expenses).
+	 * Without this, num_valid_stat_ent stays 0 and the graphs draw an empty grid. */
+	if ((_cur_month % 3) == 0) {
+		for (Company *c : Company::Iterate()) {
+			std::copy_backward(c->old_economy, c->old_economy + MAX_HISTORY_QUARTERS - 1,
+			                   c->old_economy + MAX_HISTORY_QUARTERS);
+			c->old_economy[0] = c->cur_economy;
+			c->cur_economy = {};
+			if (c->num_valid_stat_ent != MAX_HISTORY_QUARTERS) c->num_valid_stat_ent++;
+		}
+		SetWindowDirty(WC_OPERATING_PROFIT, 0);
+		SetWindowDirty(WC_INCOME_GRAPH, 0);
+	}
 }
 
 /* Seed the economy constants the mini loop needs (avoids the heavy StartupEconomy/
@@ -145,6 +166,9 @@ extern "C" void r1_economy_startup(void)
 	_currency_specs[0] = CurrencySpec(1, "", CF_NOEURO, "\xC2\xA3", "", 0, STR_NULL);
 	/* Make the finance window's "Loan Interest" widget show 2% (it reads initial_interest). */
 	_settings_game.difficulty.initial_interest = 2;
+
+	/* R1-86: the graph plots points/lines of this width; 0 (zeroed _settings_client) = invisible. */
+	_settings_client.gui.graph_line_thickness = 3;
 
 	/* R1-80: stand up the REAL cargo table (temperate climate) so GetTransportedGoodsIncome has
 	 * genuine per-cargo payment/transit params — replaces the R1-77 magic-number fare. We don't

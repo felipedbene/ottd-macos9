@@ -97,5 +97,7 @@ extern "C" void *r1_make_roadvehicle(uint tile, int x, int y, int z, int dir)
 	v->roadtype  = ROADTYPE_ROAD;
 	v->SetFrontEngine();              /* subtype |= GVSF_FRONT -> IsPrimaryVehicle() */
 	v->sprite_cache.sprite_seq.Set((SpriteID)(0xCD4 + dir));
+	static UnitID s_next_unit = 1;    /* R1-86: distinct 1..N so the vehicle-list rows aren't all "0" */
+	v->unitnumber = s_next_unit++;
 	return v;
 }
