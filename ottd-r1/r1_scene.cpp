@@ -64,6 +64,11 @@ extern "C" unsigned r1_town_station_index(unsigned townid);   // StationID for a
 // R1-89 step 3: real Order+OrderList pools; attach a 2-stop OT_GOTO_STATION chain to a bus (m1_order.cpp).
 extern "C" int r1_attach_bus_orders(void *vehicle, unsigned station_a, unsigned station_b);
 extern "C" unsigned r1_order_count(void);
+// R1-91 autonomous buses: BFS road path (m1_pathfind.cpp) — fills out[] from->to, returns count (0=fail).
+extern "C" int r1_road_path(unsigned from_tile, unsigned to_tile, unsigned *out, int max_out);
+// R1-91 real cargo (rung b, m1_station.cpp/m1_economy.cpp): a real CargoPacket on pickup; paid deliver.
+extern "C" void r1_station_add_cargo(unsigned townid, unsigned pax);
+extern "C" long r1_deliver_cargo(unsigned pax, unsigned dist);
 #include "command_func.h"
 #include "road_type.h"
 #include "road_map.h"
@@ -74,6 +79,8 @@ extern "C" unsigned r1_order_count(void);
 #include "tree_map.h"      // MakeTree: real forests via the real DrawTile_Trees
 #include "water_map.h"     // MakeSea: a real lake (drawn by our minimal water proc)
 #include "industry_map.h"  // MakeIndustry: real industry tiles (minimal draw proc)
+#include "station_base.h"  // R1-91: Station::Get(sid)->xy for the order-driven re-path target
+#include "order_base.h"    // R1-91: Order/OrderList inline accessors (autonomous-bus order chain)
 #include "sprite.h"
 #include "date_func.h"
 #include "settings_type.h"
@@ -238,6 +245,7 @@ struct R1Bus {
     Vehicle *v;                          // this bus's OWN pooled RoadVehicle (not "the first")
     unsigned sa, sb;                     // R1-89: StationID of the two route-endpoint towns (0xFFFF=none)
     bool orders_done;                    // R1-89: real order chain attached to v exactly once
+    int  order_leg;                      // R1-91: which order (0=A,1=B) the bus is currently driving toward
 };
 static R1Bus g_bus[R1_NBUS];             // zero-init: len=0 (no route) until traced
 static void r1_trace_route(R1Bus &b, int cx, int cy);  // defined below (bus route)
@@ -429,6 +437,7 @@ extern "C" void r1_build_world(void)
     for (uint i = 0; i < R1_NBUS; i++) {
         R1Bus &b = g_bus[i];
         b.sa = b.sb = 0xFFFF; b.orders_done = false;
+        b.order_leg = 1;   // seeded route drives route[0](town A) -> route[len-1](town B) = order index 1 (sb)
         if (b.len < 1) continue;
         Town *ta = r1_town_near(b.route[0]);
         Town *tb = r1_town_near(b.route[b.len - 1]);
@@ -578,22 +587,16 @@ static void r1_bus_arrive(R1Bus &b)
         uint avail = t->supplied[CT_PASSENGERS].old_max;
         b.pax = avail < 30 ? avail : 30;
         t->supplied[CT_PASSENGERS].old_act += b.pax;   // feeds GetPercentTransported()
-        // R1-83: record the pickup on the town's REAL pooled Station (goods[CT_PASSENGERS]).
-        r1_station_pickup((unsigned)t->index, b.pax);
+        // R1-91: append a REAL CargoPacket to the town's Station goods[CT_PASSENGERS].cargo (rung b) —
+        // the waiting cargo now accumulates, so the station-list window's cargo-rating bars light up.
+        r1_station_add_cargo((unsigned)t->index, b.pax);
         return;
     }
-    // DELIVER at the far town. R1-80: the REAL GetTransportedGoodsIncome (m1_economy.cpp, using
-    // the real temperate CargoSpec[CT_PASSENGERS] payment/transit params) replaces the R1-77
-    // magic-number fare. dist = route length in tiles; transit_days ~ a quarter of that so
-    // longer routes take the mild time-factor penalty the real formula applies.
+    // DELIVER at the far town. R1-91: the simplified real DeliverGoods (m1_economy.cpp) computes the
+    // fare via the real GetTransportedGoodsIncome + credits COMPANY_FIRST (EXPENSES_ROADVEH_REVENUE,
+    // negative). dist = route length in tiles.
     uint dist = (uint)b.len;
-    byte transit_days = (byte)std::min<uint>(b.len / 4 + 1, 255);
-    Money fare = GetTransportedGoodsIncome(b.pax, dist, transit_days, CT_PASSENGERS);
-    if (fare < 1) fare = 1;
-    CompanyID save = _current_company;
-    _current_company = COMPANY_FIRST;
-    SubtractMoneyFromCompany(CommandCost(EXPENSES_ROADVEH_REVENUE, -fare));  // negative = income
-    _current_company = save;
+    r1_deliver_cargo(b.pax, dist);
     b.pax = 0;
 }
 
@@ -631,7 +634,33 @@ static bool r1_bus_move(R1Bus &b, int mult)
         if (++b.prog >= 16) {
             b.prog = 0;
             b.i += b.dir;
-            if (b.i >= b.len - 1) { b.i = b.len - 1; b.dir = -1; r1_bus_arrive(b); }
+            if (b.i >= b.len - 1) {
+                b.i = b.len - 1;
+                r1_bus_arrive(b);                       // pickup/deliver at the destination station
+                // R1-91: ORDER-DRIVEN re-path. Advance to the bus's other order (m1_order.cpp chain)
+                // and BFS a fresh road route to that Station (m1_pathfind.cpp) — the bus picks its own
+                // path each leg instead of ping-ponging a fixed route. Fallback to the old bounce if
+                // there's no order chain / no road path, so a bus is never stranded.
+                Vehicle *v = b.v;
+                bool repathed = false;
+                if (v != nullptr && v->orders != nullptr && v->GetNumOrders() >= 2) {
+                    int next_leg = b.order_leg ^ 1;                 // toggle A<->B
+                    Order *o = v->GetOrder(next_leg);
+                    if (o != nullptr && o->IsType(OT_GOTO_STATION)) {
+                        StationID dest = (StationID)o->GetDestination();
+                        v->current_order.MakeGoToStation(dest);     // keep current_order coherent
+                        TileIndex src = b.route[b.len - 1];         // copy BEFORE r1_road_path overwrites route[]
+                        TileIndex dst = Station::Get(dest)->xy;
+                        int n = r1_road_path((unsigned)src, (unsigned)dst, (unsigned *)b.route, 64);
+                        if (n >= 2) {
+                            b.len = n; b.i = 0; b.prog = 0; b.dir = 1;
+                            b.order_leg = next_leg;
+                            repathed = true;
+                        }
+                    }
+                }
+                if (!repathed) b.dir = -1;               // no order/path -> ping-pong back (route[] intact on fail)
+            }
             else if (b.i <= 0)    { b.i = 0;         b.dir = 1; r1_bus_arrive(b); }
         }
     }
@@ -970,6 +999,19 @@ struct R1MainWindow : Window {
         nvp->InitializeViewport(this, TileXY(32, 32), ScaleZoomGUI(ZOOM_LVL_VIEWPORT));
         MarkWholeScreenDirty();   // force the first full redraw of the real window
     }
+
+    // R1-91 drag-to-pan: the real HandleViewportScroll (window.cpp) computes the drag delta and
+    // calls _last_scroll_window->OnScroll(). Window::OnScroll is a no-op by default (so the map was
+    // static); move the real viewport here, exactly like the stock MainWindow (main_gui.cpp:413).
+    // Gesture is Ctrl+drag (the Mac driver emulates the right button as Ctrl+click, so this works
+    // even on the single-button trackpad); scroll_mode=VSM_MAP_RMB (set in r1_start_window_system).
+    void OnScroll(Point delta) override
+    {
+        this->viewport->scrollpos_x += ScaleByZoom(delta.x, this->viewport->zoom);
+        this->viewport->scrollpos_y += ScaleByZoom(delta.y, this->viewport->zoom);
+        this->viewport->dest_scrollpos_x = this->viewport->scrollpos_x;
+        this->viewport->dest_scrollpos_y = this->viewport->scrollpos_y;
+    }
 };
 
 // ---------------------------------------------------------------------------
@@ -1219,6 +1261,11 @@ extern "C" void r1_start_window_system(void)
     // bounds so the viewport keeps OUT_4X and virtual/zoom stay consistent.
     _settings_client.gui.zoom_min = ZOOM_LVL_MIN;
     _settings_client.gui.zoom_max = ZOOM_LVL_MAX;
+    // R1-91 drag-to-pan: VSM_MAP_RMB = hold the right button (Ctrl+drag on this hardware), cursor
+    // moves freely, map follows. The default (0 = VSM_VIEWPORT_RMB_FIXED) sets _cursor.fix_at, which
+    // needs the driver to warp the cursor back to the anchor each frame; the Mac driver never warps,
+    // so the fixed-cursor delta runs away. MAP_RMB uses incremental deltas -> steady, natural pan.
+    _settings_client.gui.scroll_mode = VSM_MAP_RMB;
 
     ottd_log("R1: InitWindowSystem...");
     InitWindowSystem();

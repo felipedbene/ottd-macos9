@@ -66,7 +66,7 @@ Window *FindWindowFromPt(int, int) { return nullptr; }
 #endif
 
 /* ---- "open a GUI window" entry points ---- */
-void ShowTownViewWindow(TownID) {}
+/* ShowTownViewWindow now REAL — the extracted TownViewWindow in m1_town_gui.cpp (R1-91). */
 void ShowStationViewWindow(StationID) {}
 void ShowVehicleViewWindow(const Vehicle *) {}
 void ShowWaypointWindow(const Waypoint *) {}

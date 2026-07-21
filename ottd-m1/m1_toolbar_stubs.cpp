@@ -179,7 +179,7 @@ void ShowScreenshotWindow() {}
 void ShowBuildTreesToolbar() {}
 void ShowCargoPaymentRates() {}
 void ShowCompanyValueGraph() {}
-void ShowIndustryDirectory() {}
+/* ShowIndustryDirectory now REAL — the extracted IndustryDirectoryWindow in m1_industry_gui.cpp (R1-91). */
 void ShowBuildIndustryWindow() {}
 void ShowDeliveredCargoGraph() {}
 void ShowSpriteAlignerWindow() {}

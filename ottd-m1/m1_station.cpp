@@ -40,6 +40,16 @@
  * the XCOFF link). Same intent as m1_road_stubs.cpp:60 for VehicleCargoList. */
 template <> CargoList<StationCargoList, StationCargoPacketMap>::~CargoList();
 
+/* R1 rung-b: r1_station_add_cargo (below) makes the StationCargoPacketMap NON-empty. The new
+ * StationCargoList::Append odr-uses these two base-class members. DECLARE the explicit
+ * specializations HERE — before station_base.h triggers implicit instantiation of the
+ * CargoList<StationCargoList,...> members — so the compiler defers to OUR definitions instead of
+ * emitting its own from the (uncompiled) cargopacket.cpp (which would dup at the XCOFF link).
+ * Same deferral trick as the ~CargoList declaration above. RemoveFromCache is intentionally NOT
+ * specialized: nothing in this TU removes station cargo, so it is never instantiated. */
+template <> void CargoList<StationCargoList, StationCargoPacketMap>::AddToCache(const CargoPacket *cp);
+template <> bool CargoList<StationCargoList, StationCargoPacketMap>::TryMerge(CargoPacket *icp, CargoPacket *cp);
+
 #include "station_base.h"
 #include "roadstop_base.h"
 #include "core/pool_func.hpp"
@@ -54,12 +64,78 @@ template <> CargoList<StationCargoList, StationCargoPacketMap>::~CargoList();
 template <>
 CargoList<StationCargoList, StationCargoPacketMap>::~CargoList() {}
 
+/* ------- R1 rung-b: minimal real cargo machinery (from cargopacket.cpp, NOT compiled) -------
+ * Only the members that r1_station_add_cargo / StationCargoList::Append actually reach are given
+ * local bodies (explicit specialization), mirroring the ~CargoList trick. */
+
+/* Base-list cache update on Append (cargopacket.cpp:191-196). Uses the public inline accessors so
+ * it needs no friendship. */
+template <>
+void CargoList<StationCargoList, StationCargoPacketMap>::AddToCache(const CargoPacket *cp)
+{
+	this->count                 += cp->Count();
+	this->cargo_days_in_transit += (uint)cp->DaysInTransit() * cp->Count();
+}
+
+/* Base-list static merge helper (cargopacket.cpp:217-227). AreMergable is a public inline on
+ * StationCargoList; Merge is public on CargoPacket (defined below). */
+template <>
+/* static */ bool CargoList<StationCargoList, StationCargoPacketMap>::TryMerge(CargoPacket *icp, CargoPacket *cp)
+{
+	if (StationCargoList::AreMergable(icp, cp) &&
+			icp->Count() + cp->Count() <= CargoPacket::MAX_COUNT) {
+		icp->Merge(cp);
+		return true;
+	}
+	return false;
+}
+
+/* CargoPacket ctor used by r1_station_add_cargo (cargopacket.cpp:44-55, minus the count!=0 assert
+ * which is compiled out under NDEBUG anyway). Init-list order matches the header's field order. */
+CargoPacket::CargoPacket(StationID source, TileIndex source_xy, uint16 count, SourceType source_type, SourceID source_id) :
+	feeder_share(0),
+	count(count),
+	days_in_transit(0),
+	source_id(source_id),
+	source(source),
+	source_xy(source_xy),
+	loaded_at_xy(0)
+{
+	this->source_type = source_type;
+}
+
+/* CargoPacket::Merge (cargopacket.cpp:104-109) — referenced by TryMerge above. `delete cp` returns
+ * the packet to _cargopacket_pool (its ~CargoPacket is the inline empty one in the header). */
+void CargoPacket::Merge(CargoPacket *cp)
+{
+	this->count += cp->count;
+	this->feeder_share += cp->feeder_share;
+	delete cp;
+}
+
+/* StationCargoList::Append (cargopacket.cpp:690-703) — the one path that grows the map. */
+void StationCargoList::Append(CargoPacket *cp, StationID next)
+{
+	this->AddToCache(cp);
+
+	StationCargoPacketMap::List &list = this->packets[next];
+	for (StationCargoPacketMap::List::reverse_iterator it(list.rbegin());
+			it != list.rend(); it++) {
+		if (StationCargoList::TryMerge(*it, cp)) return;
+	}
+	list.push_back(cp);
+}
+
 /* Real pools — replace the fake `char _station_pool[8192]` deadpool (guarded out of
  * m1_deadpools.c under R1_MERGE). _roadstop_pool is brand-new (no compiled TU referenced it). */
 StationPool _station_pool("Station");
 INSTANTIATE_POOL_METHODS(Station)
 RoadStopPool _roadstop_pool("RoadStop");
 INSTANTIATE_POOL_METHODS(RoadStop)
+/* R1 rung-b: real CargoPacket pool (brand-new symbol; cargopacket.cpp is not compiled, so no ODR
+ * clash). ~CargoPacket is inline-empty in the header, so CleanPool is safe to instantiate. */
+CargoPacketPool _cargopacket_pool("CargoPacket");
+INSTANTIATE_POOL_METHODS(CargoPacket)
 
 /* ------- Station ctor (verbatim from station.cpp:64-75, self-contained) ------- */
 Station::Station(TileIndex tile) :
@@ -142,6 +218,29 @@ extern "C" void r1_station_pickup(unsigned townid, unsigned pax)
 	if (st == nullptr) return;
 	GoodsEntry &ge = st->goods[CT_PASSENGERS];
 	ge.max_waiting_cargo += pax;
+	unsigned r = (unsigned)ge.rating + 8;
+	ge.rating = (byte)(r > 255 ? 255 : r);
+}
+
+/* R1 rung-b: the UPGRADED pickup — allocate a REAL CargoPacket of `pax` passengers and Append it to
+ * the town Station's goods[CT_PASSENGERS].cargo (a StationCargoList). This makes
+ * goods[CT_PASSENGERS].cargo.TotalCount() > 0, which is what lights up the station-list window's
+ * cargo-rating bars. Also nudges the rating up like r1_station_pickup. Source is tagged ST_TOWN /
+ * town index; the packet's source fields don't affect the fare (r1_deliver_cargo computes that from
+ * an explicit dist), they just make the packet well-formed. */
+extern "C" void r1_station_add_cargo(unsigned townid, unsigned pax)
+{
+	if (townid >= R1_MAX_TOWN_STATIONS || pax == 0) return;
+	Station *st = g_town_station[townid];
+	if (st == nullptr) return;
+	if (!CargoPacket::CanAllocateItem()) return;
+
+	if (pax > CargoPacket::MAX_COUNT) pax = CargoPacket::MAX_COUNT;
+	GoodsEntry &ge = st->goods[CT_PASSENGERS];
+	SourceID src = (st->town != nullptr) ? (SourceID)st->town->index : INVALID_SOURCE;
+	CargoPacket *cp = new CargoPacket((StationID)st->index, st->xy, (uint16)pax, ST_TOWN, src);
+	ge.cargo.Append(cp, INVALID_STATION);
+
 	unsigned r = (unsigned)ge.rating + 8;
 	ge.rating = (byte)(r > 255 ? 255 : r);
 }

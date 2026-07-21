@@ -21,6 +21,8 @@
 #include "stdafx.h"
 #include "economy_func.h"     /* SubtractMoneyFromCompany, _economy, _price (externs) */
 #include "economy_type.h"     /* Economy, Prices, PR_STATION_VALUE, EXPENSES_* */
+#include "economy_base.h"     /* CargoPaymentPool / CargoPayment (R1 rung-b cargo-payment pool) */
+#include "core/pool_func.hpp" /* INSTANTIATE_POOL_METHODS (R1 rung-b) */
 #include "company_base.h"     /* Company::Iterate / GetIfValid */
 #include "vehicle_base.h"     /* Vehicle::Iterate, VEH_ROAD (R1-87 daily running cost) */
 #include "company_func.h"     /* _current_company */
@@ -78,6 +80,15 @@ Money GetTransportedGoodsIncome(uint num_pieces, uint dist, byte transit_days, C
  * them) is NOT compiled, so no ODR clash. */
 Economy _economy;
 Prices  _price;
+
+/* R1 rung-b: stand up the cargo-payment pool (brand-new symbol; economy.cpp / cargopacket.cpp are
+ * not compiled, so no ODR clash). CleanPool odr-uses ~CargoPayment, so provide an EMPTY stub: the
+ * simplified deliver path (r1_deliver_cargo, below) never ALLOCATES a CargoPayment — the pool is
+ * always empty and there is nothing to finalize. This keeps the real ~CargoPayment (which drags the
+ * Vehicle / cost-animation cascade) out of the fragile XCOFF link. */
+CargoPaymentPool _cargo_payment_pool("CargoPayment");
+INSTANTIATE_POOL_METHODS(CargoPayment)
+CargoPayment::~CargoPayment() {}
 
 /* Real one lives in company_cmd.cpp (uncompiled). The finance/company windows aren't open in
  * R1, and the R1InfoWindow repaints itself a few times/sec, so a no-op is fine. */
@@ -163,6 +174,26 @@ void CompaniesMonthlyLoop()
 		SetWindowDirty(WC_OPERATING_PROFIT, 0);
 		SetWindowDirty(WC_INCOME_GRAPH, 0);
 	}
+}
+
+/* R1 rung-b: the simplified DeliverGoods. Computes the fare for `pax` passengers carried `dist`
+ * tiles via the real GetTransportedGoodsIncome (above), then credits COMPANY_FIRST through the real
+ * SubtractMoneyFromCompany (negative EXPENSES_ROADVEH_REVENUE == income). Drops the whole
+ * subsidy / link-graph / industry-acceptance / station-rating cascade of economy.cpp's DeliverGoods.
+ * Returns the income so the caller can log it. transit_days mirrors r1_scene's old inline fare
+ * (dist/4+1) so the mild time-factor penalty on long routes is unchanged. This replaces the R1-80
+ * inline GetTransportedGoodsIncome + SubtractMoneyFromCompany block in r1_bus_arrive. */
+extern "C" long r1_deliver_cargo(unsigned pax, unsigned dist)
+{
+	if (pax == 0) return 0;
+	byte transit_days = (byte)std::min<uint>(dist / 4 + 1, 255);
+	Money income = GetTransportedGoodsIncome((uint)pax, (uint)dist, transit_days, CT_PASSENGERS);
+	if (income < 1) income = 1;
+	CompanyID save = _current_company;
+	_current_company = COMPANY_FIRST;
+	SubtractMoneyFromCompany(CommandCost(EXPENSES_ROADVEH_REVENUE, -income));
+	_current_company = save;
+	return (long)income;
 }
 
 /* Seed the economy constants the mini loop needs (avoids the heavy StartupEconomy/

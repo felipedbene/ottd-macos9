@@ -47,8 +47,8 @@ const char *GetGameStringPtr(uint) { return ""; }
 void ReconsiderGameScriptLanguage() {}
 
 /* --- industry / cargo (called by ReadLanguagePack rebuilds + SCC_INDUSTRY/CARGO codes) --- */
-const IndustrySpec *GetIndustrySpec(IndustryType) { return nullptr; }
-void SortIndustryTypes() {}
+/* R1-91: GetIndustrySpec + SortIndustryTypes now REAL in m1_industry_gui.cpp (the industry windows
+ * need a non-null zeroed IndustrySpec, not the old nullptr stub). Moved there to avoid dup. */
 void BuildIndustriesLegend() {}
 /* InitializeSortedCargoSpecs now REAL — compiled cargotype.cpp owns it (R1-80). */
 void BuildContentTypeStringList() {}

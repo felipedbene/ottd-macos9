@@ -317,9 +317,9 @@ public:
 				const Town *t = this->towns[id_v];
 				assert(t != nullptr);
 				if (_ctrl_pressed) {
-					ShowExtraViewportWindow(t->xy);
+					ScrollMainWindowToTile(t->xy);         // Ctrl+click: just centre the map (old behaviour)
 				} else {
-					ScrollMainWindowToTile(t->xy);
+					ShowTownViewWindow(t->index);          // R1-91: open the town's own view window
 				}
 				break;
 			}

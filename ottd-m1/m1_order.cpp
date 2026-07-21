@@ -117,6 +117,19 @@ extern "C" int r1_attach_bus_orders(void *vehicle, unsigned station_a, unsigned 
 	return 1;
 }
 
+/* R1-91: OrderList::GetOrderAt (verbatim from order_cmd.cpp:357-366, that TU not compiled). The
+ * autonomous-bus re-path (r1_scene.cpp) calls v->GetOrder(leg) which forwards here to fetch the
+ * Nth order in the chain. Real walk over `first`/`next` — needed for order-driven navigation. */
+Order *OrderList::GetOrderAt(int index) const
+{
+	if (index < 0) return nullptr;
+	Order *order = this->first;
+	while (order != nullptr && index-- > 0) {
+		order = order->next;
+	}
+	return order;
+}
+
 /* ---- Validation hook: how many real Orders currently live in the pool. ---- */
 extern "C" unsigned r1_order_count(void)
 {
