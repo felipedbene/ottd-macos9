@@ -434,7 +434,24 @@ extern "C" void r1_build_world(void)
         Town *tb = r1_town_near(b.route[b.len - 1]);
         if (ta != nullptr) b.sa = r1_town_station_index((unsigned)ta->index);
         if (tb != nullptr) b.sb = r1_town_station_index((unsigned)tb->index);
-        if (b.sb != 0xFFFF) r1_place_bus_stop((unsigned)b.route[b.len - 1], b.sb, 0);
+        if (b.sb != 0xFFFF) {
+            // R1-90: orient the bay stop by the ROAD, not a fixed NE. The entrance must face the
+            // road tile the bus arrives from (route[len-2]); a hardcoded axis made every stop face
+            // NE, so stops on differently-running roads looked inverted. DiagDirection = delta from
+            // the end tile toward the previous route tile (OTTD _tileoffs_by_diagdir: NE{-1,0}
+            // SE{0,+1} SW{+1,0} NW{0,-1}).
+            int axis = 0;
+            if (b.len >= 2) {
+                TileIndex endt = b.route[b.len - 1], prev = b.route[b.len - 2];
+                int dx = (int)TileX(prev) - (int)TileX(endt);
+                int dy = (int)TileY(prev) - (int)TileY(endt);
+                if      (dx < 0) axis = 0;   // DIAGDIR_NE
+                else if (dy > 0) axis = 1;   // DIAGDIR_SE
+                else if (dx > 0) axis = 2;   // DIAGDIR_SW
+                else             axis = 3;   // DIAGDIR_NW
+            }
+            r1_place_bus_stop((unsigned)b.route[b.len - 1], b.sb, axis);
+        }
     }
 
     // Place the industries on their flat pads (bare grass only). index=0 is a dummy —

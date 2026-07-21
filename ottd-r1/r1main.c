@@ -20,7 +20,7 @@
 
 /* Bumped every deploy so the sink trace unambiguously identifies which binary ran
  * (a stale previously-decoded app on the Mac produces confusingly identical traces). */
-#define B2_BUILD_TAG "R1-89"
+#define B2_BUILD_TAG "R1-90"
 
 /* ROOT-CAUSE FIX ATTEMPT for the intermittent static-init anomaly:
  * C++ static constructors (blitter/driver registries, factory std::strings)
