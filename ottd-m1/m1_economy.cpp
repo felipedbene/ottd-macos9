@@ -22,6 +22,7 @@
 #include "economy_func.h"     /* SubtractMoneyFromCompany, _economy, _price (externs) */
 #include "economy_type.h"     /* Economy, Prices, PR_STATION_VALUE, EXPENSES_* */
 #include "company_base.h"     /* Company::Iterate / GetIfValid */
+#include "vehicle_base.h"     /* Vehicle::Iterate, VEH_ROAD (R1-87 daily running cost) */
 #include "company_func.h"     /* _current_company */
 #include "command_func.h"     /* CommandCost */
 #include "date_func.h"        /* _cur_month */
@@ -115,23 +116,37 @@ void SubtractMoneyFromCompany(const CommandCost &cost)
 	if (c != nullptr) SubtractMoneyFromAnyCompany(c, cost);
 }
 
-/* Replaces the empty CompaniesMonthlyLoop stub (removed from m1_shims.cpp). Minimal money
- * movement — loan interest + a flat property upkeep per company, from economy.cpp's
- * CompaniesPayInterest (economy.cpp:825). Wired to fire monthly by the live OnNewMonth. */
+/* R1-87: real DAILY expenses (replaces the no-op EnginesDailyLoop stub; date.cpp's OnNewDay
+ * already calls it, same ~74-tick cadence as the industry daily production). The interest/upkeep
+ * used to live in CompaniesMonthlyLoop, but the monthly loop fires too rarely (~2220 ticks) to be
+ * visible in a short session — so money only ever climbed from bus fares and the finance window's
+ * expense columns stayed BLANK. Charging per game-day makes expenses visibly bite: 1/360 of the
+ * annual loan interest + a small daily property upkeep per company, plus a per-bus running cost.
+ * The finance window's Operating Expenses (Loan Interest / Infrastructure / Road Vehicles) now
+ * populate, and the graphs' cur_economy.expenses accumulates. Income still exceeds it (profitable). */
+void EnginesDailyLoop()
+{
+	CompanyID save = _current_company;
+	for (const Company *c : Company::Iterate()) {
+		_current_company = c->index;
+		Money annual_interest = c->current_loan * _economy.interest_rate / 100;
+		if (c->money < 0) annual_interest += -c->money * _economy.interest_rate / 100;
+		SubtractMoneyFromCompany(CommandCost(EXPENSES_LOAN_INTEREST, annual_interest / 360 + 1));
+		SubtractMoneyFromCompany(CommandCost(EXPENSES_PROPERTY, 2));   /* small daily property upkeep */
+	}
+	for (const Vehicle *v : Vehicle::Iterate()) {
+		if (v->type != VEH_ROAD) continue;
+		_current_company = v->owner;
+		SubtractMoneyFromCompany(CommandCost(EXPENSES_ROADVEH_RUN, 3));  /* per-bus daily running cost */
+	}
+	_current_company = save;
+}
+
+/* Replaces the empty CompaniesMonthlyLoop stub (removed from m1_shims.cpp). R1-87: interest/upkeep
+ * moved to the DAILY EnginesDailyLoop above (visible in short sessions); this loop now only does the
+ * quarterly history roll for the graphs. Wired to fire monthly by the live OnNewMonth. */
 void CompaniesMonthlyLoop()
 {
-	for (const Company *c : Company::Iterate()) {
-		CompanyID save = _current_company;
-		_current_company = c->index;
-		Money yearly_fee = c->current_loan * _economy.interest_rate / 100;
-		if (c->money < 0) yearly_fee += -c->money * _economy.interest_rate / 100;
-		Money up_to_prev = yearly_fee * _cur_month / 12;
-		Money up_to_this = yearly_fee * (_cur_month + 1) / 12;
-		SubtractMoneyFromCompany(CommandCost(EXPENSES_LOAN_INTEREST, up_to_this - up_to_prev));
-		SubtractMoneyFromCompany(CommandCost(EXPENSES_OTHER, _price[PR_STATION_VALUE] >> 2));
-		_current_company = save;
-	}
-
 	/* R1-86: quarterly history roll so the operating-profit / income graphs have data. Mirrors
 	 * economy.cpp's CompaniesGenStatistics (economy.cpp:692-701): every 3rd month, snapshot the
 	 * quarter's cur_economy into old_economy[0] and reset. UpdateCompanyRatingAndValue is dropped

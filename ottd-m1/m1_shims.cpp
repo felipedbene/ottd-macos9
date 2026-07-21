@@ -131,7 +131,7 @@ void CompaniesYearlyLoop() {}
 void StationMonthlyLoop() {}      // station_cmd.cpp
 void SubsidyMonthlyLoop() {}      // subsidy.cpp
 void DisasterDailyLoop() {}       // disaster_vehicle.cpp
-void EnginesDailyLoop() {}        // engine.cpp
+/* EnginesDailyLoop now REAL — repurposed as the daily company/vehicle expense charge (m1_economy.cpp, R1-87). */
 void EnginesMonthlyLoop() {}
 void VehiclesYearlyLoop() {}      // vehicle.cpp
 

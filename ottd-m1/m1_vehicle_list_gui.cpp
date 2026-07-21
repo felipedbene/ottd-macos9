@@ -196,7 +196,8 @@ void BaseVehicleListWindow::DrawVehicleListItems(VehicleID, int line_height, con
 		SetDParam(1, vehgroup.GetDisplayProfitLastYear());
 		DrawString(tr.left, tr.right, ir.bottom - FONT_HEIGHT_SMALL - WidgetDimensions::scaled.framerect.bottom, STR_VEHICLE_LIST_PROFIT_THIS_YEAR_LAST_YEAR);
 
-		DrawVehicleProfitButton(vehgroup.GetOldestVehicleAge(), vehgroup.GetDisplayProfitLastYear(), vehgroup.NumVehicles(), vehicle_button_x, ir.top + FONT_HEIGHT_NORMAL + WidgetDimensions::scaled.vsep_normal);
+		/* R1-87: profit-indicator button removed — SPR_PROFIT_NA/SMALL/NEGATIVE aren't in the loaded
+		 * base GRF, so DrawVehicleProfitButton rendered the missing-sprite "?" on every row. */
 
 		const Vehicle *v = vehgroup.GetSingleVehicle();
 
