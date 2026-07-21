@@ -58,6 +58,12 @@ extern "C" unsigned r1_industry_count(void);            // # industries in the p
 extern "C" void r1_make_town_station(unsigned townid, unsigned tile);
 extern "C" void r1_station_pickup(unsigned townid, unsigned pax);
 extern "C" unsigned r1_station_count(void);
+// R1-89 step 2: a VISIBLE bus-stop tile (m1_station_draw.cpp writes MP_STATION + owns the draw proc).
+extern "C" void r1_place_bus_stop(unsigned tile, unsigned station_index, int axis);
+extern "C" unsigned r1_town_station_index(unsigned townid);   // StationID for a town (0xFFFF = none)
+// R1-89 step 3: real Order+OrderList pools; attach a 2-stop OT_GOTO_STATION chain to a bus (m1_order.cpp).
+extern "C" int r1_attach_bus_orders(void *vehicle, unsigned station_a, unsigned station_b);
+extern "C" unsigned r1_order_count(void);
 #include "command_func.h"
 #include "road_type.h"
 #include "road_map.h"
@@ -230,9 +236,12 @@ struct R1Bus {
     int  bvx0, bvy0, bvx1, bvy1;         // previous virtual dirty rect (to erase the old sprite)
     bool bv_valid;
     Vehicle *v;                          // this bus's OWN pooled RoadVehicle (not "the first")
+    unsigned sa, sb;                     // R1-89: StationID of the two route-endpoint towns (0xFFFF=none)
+    bool orders_done;                    // R1-89: real order chain attached to v exactly once
 };
 static R1Bus g_bus[R1_NBUS];             // zero-init: len=0 (no route) until traced
 static void r1_trace_route(R1Bus &b, int cx, int cy);  // defined below (bus route)
+static Town *r1_town_near(TileIndex t);                // defined below (nearest town to a tile)
 static void r1_make_viewport(int scroll_x, int scroll_y, Viewport *vp);  // defined below (draw)
 // Tap-to-zoom cycles this; the draw + pick + bus read it. NORMAL=0..OUT_8X=3.
 static ZoomLevel g_zoom = ZOOM_LVL_OUT_4X;
@@ -411,6 +420,22 @@ extern "C" void r1_build_world(void)
     // Any town whose roads are too short traces len<2 and its bus no-ops harmlessly.
     for (uint i = 0; i < R1_NBUS; i++)
         r1_trace_route(g_bus[i], (int)R1_TOWNS[i].x, (int)R1_TOWNS[i].y);
+
+    // R1-89 step 2+3: resolve each bus's two endpoint stations, make the route-END a VISIBLE
+    // bus-stop tile (MP_STATION — routes are already traced, so converting the tile can't disturb
+    // the pre-stored animation), and remember the StationIDs so the order chain can be attached to
+    // the Vehicle once it's lazily created (r1_update_vehicle). r1_town_near maps a tile to its
+    // nearest town; that town's real pooled Station (R1-83) carries the index the tile stores.
+    for (uint i = 0; i < R1_NBUS; i++) {
+        R1Bus &b = g_bus[i];
+        b.sa = b.sb = 0xFFFF; b.orders_done = false;
+        if (b.len < 1) continue;
+        Town *ta = r1_town_near(b.route[0]);
+        Town *tb = r1_town_near(b.route[b.len - 1]);
+        if (ta != nullptr) b.sa = r1_town_station_index((unsigned)ta->index);
+        if (tb != nullptr) b.sb = r1_town_station_index((unsigned)tb->index);
+        if (b.sb != 0xFFFF) r1_place_bus_stop((unsigned)b.route[b.len - 1], b.sb, 0);
+    }
 
     // Place the industries on their flat pads (bare grass only). index=0 is a dummy —
     // our minimal proc draws from gfx alone and never touches the Industry pool.
@@ -622,6 +647,13 @@ static void r1_update_vehicle(R1Bus &b)
     if (b.v == nullptr) {   // lazily create THIS bus's own pooled puppet on first move
         b.v = (Vehicle *)r1_make_roadvehicle((uint)b.route[b.i], wx, wy, wz, (int)dir);
         if (b.v == nullptr) return;   // pool full
+        // R1-89 step 3: attach a REAL 2-stop OT_GOTO_STATION order chain (m1_order.cpp) exactly
+        // once, now that the Vehicle exists. Invisible plumbing (the bus still ping-pongs off
+        // route[]) — the first rung toward order-driven autonomous buses. A==B is harmless.
+        if (!b.orders_done && b.sa != 0xFFFF && b.sb != 0xFFFF) {
+            r1_attach_bus_orders(b.v, b.sa, b.sb);
+            b.orders_done = true;
+        }
         return;                       // sprite/pos already set by r1_make_roadvehicle
     }
     Vehicle *v = b.v;
@@ -817,11 +849,11 @@ extern "C" void r1_tick(void)
     ++n;
     if (n == 1 || (n & 0x7F) == 0) {
         const Town *t0 = Town::GetIfValid(0);
-        ottd_log("R1: live tick=%u date=%d mon=%d houses=%u pop=%u ind=%u cargo=%lu stations=%u | bus0 i=%d dir=%d len=%d",
+        ottd_log("R1: live tick=%u date=%d mon=%d houses=%u pop=%u ind=%u cargo=%lu stations=%u orders=%u | bus0 i=%d dir=%d len=%d",
                  n, (int)_date, (int)_cur_month,
                  t0 ? (uint)t0->cache.num_houses : 0u,
                  t0 ? (uint)t0->cache.population : 0u,
-                 r1_industry_count(), r1_industry_stockpile(), r1_station_count(),
+                 r1_industry_count(), r1_industry_stockpile(), r1_station_count(), r1_order_count(),
                  g_bus[0].i, g_bus[0].dir, g_bus[0].len);
         // R1-88 money reconciliation: the ONLY writer (SubtractMoneyFromAnyCompany) does
         // money -= cost AND yearly_expenses[0][type] += cost in lockstep, so money MUST equal

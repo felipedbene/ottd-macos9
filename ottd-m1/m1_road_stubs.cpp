@@ -128,9 +128,8 @@ Vehicle::~Vehicle() {}
 uint Vehicle::Crash(bool) { return 0; }
 Depot::~Depot() {}
 
-/* ---- member-subobject destructor pulled in by ~Vehicle (orders) ----
- *      (the VehicleCargoList destructor is specialized above the includes) ---- */
-Order::~Order() {}
+/* R1-89: Order::~Order() moved to m1_order.cpp (which now owns the real Order/OrderList pools).
+ * The VehicleCargoList destructor is still specialized above the includes. */
 
 /* ---- ground-vehicle cache recompute for the road-vehicle instantiation ---- */
 template <> void GroundVehicle<RoadVehicle, VEH_ROAD>::CargoChanged() {}

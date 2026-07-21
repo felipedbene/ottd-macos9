@@ -151,3 +151,12 @@ extern "C" unsigned r1_station_count(void)
 {
 	return (unsigned)Station::GetNumItems();
 }
+
+/* R1-89: StationID for a town's real Station, so r1_scene can (a) write the town's MP_STATION
+ * bus-stop tile (m1_station_draw.cpp) with the correct index and (b) point the bus's order chain
+ * at real Stations. Returns 0xFFFF (INVALID_STATION) if the town has no station yet. */
+extern "C" unsigned r1_town_station_index(unsigned townid)
+{
+	if (townid >= R1_MAX_TOWN_STATIONS || g_town_station[townid] == nullptr) return 0xFFFF;
+	return (unsigned)g_town_station[townid]->index;
+}
