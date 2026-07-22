@@ -252,6 +252,7 @@ static void r1_trace_route(R1Bus &b, int cx, int cy);  // defined below (bus rou
 static Town *r1_town_near(TileIndex t);                // defined below (nearest town to a tile)
 static TileIndex r1_road_tile_near(int cx, int cy, int rad);          // R1-92: nearest MP_ROAD tile
 static int r1_build_road_path(int x0, int y0, int x1, int y1);        // R1-92: lay an inter-town road
+static int r1_find_straight_stop(const R1Bus &b, bool corner_end, int *axis);  // R1-95: straight stop tile
 static void r1_make_viewport(int scroll_x, int scroll_y, Viewport *vp);  // defined below (draw)
 // Tap-to-zoom cycles this; the draw + pick + bus read it. NORMAL=0..OUT_8X=3.
 static ZoomLevel g_zoom = ZOOM_LVL_OUT_4X;
@@ -480,23 +481,25 @@ extern "C" void r1_build_world(void)
     for (uint i = 0; i < R1_NBUS; i++) {
         R1Bus &b = g_bus[i];
         if (b.len < 2) continue;
-        int idxs[2] = { b.len - 1, 0 };          // corner end, centre end
-        int nbs[2]  = { b.len - 2, 1 };          // the adjacent tile (for stop orientation)
-        unsigned sid[2] = { b.sb, b.sa };
+        bool corner_end[2] = { true, false };    // the corner end, then the centre end
+        unsigned sid[2]    = { b.sb, b.sa };
         for (int e = 0; e < 2; e++) {
             if (sid[e] == 0xFFFF) continue;
-            TileIndex t0 = b.route[idxs[e]], t1 = b.route[nbs[e]];
-            if (GetTileType(t0) == MP_STATION) continue;   // already a stop (shared hub) -> once
-            int dx = (int)TileX(t1) - (int)TileX(t0);
-            int dy = (int)TileY(t1) - (int)TileY(t0);
-            int axis = (dx < 0) ? 0 : (dy > 0) ? 1 : (dx > 0) ? 2 : 3;
+            // R1-95: place a DRIVE-THROUGH stop on a STRAIGHT road tile near this end (not the
+            // endpoint, which is often an intersection) with the road's axis, so the road stays
+            // open both ways and the bus drives THROUGH the stop (realistic) instead of the old
+            // bay that blocked the street.
+            int axis;
+            int k = r1_find_straight_stop(b, corner_end[e], &axis);
+            TileIndex t0 = b.route[k];
+            if (GetTileType(t0) == MP_STATION) continue;   // that tile is already a stop -> place once
             r1_place_bus_stop((unsigned)t0, sid[e], axis);
             stops_placed++;
-            ottd_log("R1-94: stop%d at (%d,%d) type=%d", stops_placed,
-                     (int)TileX(t0), (int)TileY(t0), (int)GetTileType(t0));
+            ottd_log("R1-95: stop%d (%d,%d) axis=%d type=%d", stops_placed,
+                     (int)TileX(t0), (int)TileY(t0), axis, (int)GetTileType(t0));
         }
     }
-    ottd_log("R1-94: %d bus stops placed (centre hub + corners)", stops_placed);
+    ottd_log("R1-95: %d drive-through bus stops placed", stops_placed);
 
     // Place the industries on their flat pads (bare grass only). index=0 is a dummy —
     // our minimal proc draws from gfx alone and never touches the Industry pool.
@@ -647,6 +650,25 @@ static int r1_build_road_path(int x0, int y0, int x1, int y1)
         prev = cur; x = nx; y = ny; laid++;
     }
     return laid;
+}
+
+// R1-95: find a STRAIGHT through-tile on the route near one end, so a DRIVE-THROUGH bus stop sits on
+// a straight road segment (not an intersection, which forced a blocking bay). Sets *axis to the road
+// axis (0 = AXIS_X, road runs along map-X / changing TileX; 1 = AXIS_Y, along map-Y / changing TileY),
+// which r1_place_bus_stop hands to MakeDriveThroughRoadStop so the road stays open both ways. Returns
+// the route index (or the raw endpoint if no straight tile exists).
+static int r1_find_straight_stop(const R1Bus &b, bool corner_end, int *axis)
+{
+    int step = corner_end ? -1 : 1;
+    for (int k = corner_end ? b.len - 2 : 1; k >= 1 && k <= b.len - 2; k += step) {
+        int px = (int)TileX(b.route[k - 1]), py = (int)TileY(b.route[k - 1]);
+        int cx = (int)TileX(b.route[k]),     cy = (int)TileY(b.route[k]);
+        int nx = (int)TileX(b.route[k + 1]), ny = (int)TileY(b.route[k + 1]);
+        if (py == cy && ny == cy && px != cx && nx != cx) { *axis = 0; return k; }   // straight along X
+        if (px == cx && nx == cx && py != cy && ny != cy) { *axis = 1; return k; }   // straight along Y
+    }
+    *axis = 0;
+    return corner_end ? b.len - 1 : 0;
 }
 
 // R1-77: the bus EARNS money — a hand-driven pickup->deliver fare (no Station/cargo TU).

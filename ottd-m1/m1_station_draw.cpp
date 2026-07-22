@@ -15,19 +15,25 @@
 // a custom _tile_type_station_procs so the real viewport can DRAW an MP_STATION
 // bus-stop tile WITHOUT pulling station_cmd.cpp's NewGRF/catchment/link-graph
 // machinery. Our world is flat at height 0 and every MP_STATION tile we write is a
-// standard (non-drive-through) bus stop, so the draw is just the classic base-set
-// bus-stop ground sprite (2692..2695) + the 3 building sprites (2696..2707) for the
-// tile's DiagDirection — ONLY classic ogfx1_base.grf sprites, never SPR_OPENTTD_BASE.
+// DRIVE-THROUGH bus stop: the road runs straight through the tile along its axis
+// (so the scripted bus drives ONTO it — correct) and we set a small shelter beside
+// the carriageway. The real drive-through sprites (SPR_BUS_STOP_DT_*) live in the
+// OpenTTD-EXTRA GRF, which is NOT on this disk (would render "?"), so we FAKE the
+// look with base ogfx1_base.grf sprites only: the classic straight-road ground
+// sprite (SPR_ROAD_X 1333 / SPR_ROAD_Y 1332) plus ONE base bus-stop BUILD sprite
+// (2696/2697) offset to the roadside as the shelter — every SpriteID < 4896.
 // The zeroed common `_tile_type_station_procs` in m1_deadpools.c merges into this
 // strong definition, exactly like m1_water_draw.cpp. Also exposes r1_place_bus_stop()
-// which writes the real MP_STATION road-stop tile (via MakeRoadStop). (R1 render-merge.)
+// which writes the real MP_STATION drive-through road-stop tile (via
+// MakeDriveThroughRoadStop). (R1 render-merge.)
 #include "stdafx.h"
 #include "landscape.h"
 #include "command_func.h"
 #include "viewport_func.h"
 #include "slope_func.h"
 #include "tile_map.h"
-#include "station_map.h"       /* MakeRoadStop, GetStationGfx, MP_STATION accessors */
+#include "station_map.h"       /* MakeDriveThroughRoadStop, GetStationGfx, MP_STATION accessors */
+#include "road_map.h"          /* GetRoadOwner, RTT_ROAD */
 #include "company_func.h"      /* _local_company */
 
 #include "table/strings.h"
@@ -35,48 +41,36 @@
 
 #include "safeguards.h"
 
-/* One building line of a bus-stop layout (subset of DrawTileSeqStruct: the fields we use).
- * Values transcribed from table/station_land.h _station_display_datas_71..74 (bus stop,
- * DiagDirections NE/SE/SW/NW). PAL_NONE — the classic sprites render fine without recolour. */
-struct R1BusSeq { int8 dx, dy, dz; uint8 sx, sy, sz; SpriteID img; };
+/* One roadside-shelter line of a fake drive-through stop (subset of DrawTileSeqStruct:
+ * the fields we use). ONE base bus-stop BUILD sprite per road axis, offset to the side
+ * of the carriageway so it reads as a shelter beside a through-road. Box dimensions are
+ * transcribed from table/station_land.h (the classic bay bus stop BUILD_A pieces), which
+ * are thin walls running parallel to the road. PAL_NONE — base sprites need no recolour.
+ * Index by Axis: [0] = AXIS_X (road runs SW<->NE), [1] = AXIS_Y (road runs SE<->NW). */
+struct R1ShelterSeq { int8 dx, dy, dz; uint8 sx, sy, sz; SpriteID img; };
 
-static const R1BusSeq _r1_bus_stop_seq[DIAGDIR_END][3] = {
-	/* NE (_station_display_datas_71) */ {
-		{  2,  0, 0, 11,  1, 10, SPR_BUS_STOP_NE_BUILD_A },
-		{ 13,  0, 0,  3, 16, 10, SPR_BUS_STOP_NE_BUILD_B },
-		{  0, 13, 0, 13,  3, 10, SPR_BUS_STOP_NE_BUILD_C },
-	},
-	/* SE (_station_display_datas_72) */ {
-		{  0,  3, 0,  1, 11, 10, SPR_BUS_STOP_SE_BUILD_A },
-		{  0,  0, 0, 16,  3, 10, SPR_BUS_STOP_SE_BUILD_B },
-		{ 13,  3, 0,  3, 13, 10, SPR_BUS_STOP_SE_BUILD_C },
-	},
-	/* SW (_station_display_datas_73) */ {
-		{  3, 15, 0, 11,  1, 10, SPR_BUS_STOP_SW_BUILD_A },
-		{  0,  0, 0,  3, 16, 10, SPR_BUS_STOP_SW_BUILD_B },
-		{  3,  0, 0, 13,  3, 10, SPR_BUS_STOP_SW_BUILD_C },
-	},
-	/* NW (_station_display_datas_74) */ {
-		{ 15,  2, 0,  1, 11, 10, SPR_BUS_STOP_NW_BUILD_A },
-		{  0, 13, 0, 16,  3, 10, SPR_BUS_STOP_NW_BUILD_B },
-		{  0,  0, 0,  3, 13, 10, SPR_BUS_STOP_NW_BUILD_C },
-	},
+static const R1ShelterSeq _r1_shelter_seq[2] = {
+	/* AXIS_X: road ground = SPR_ROAD_X; shelter is thin in Y, long in X, on the NW edge. */
+	{  2,  0, 0, 11,  1, 10, SPR_BUS_STOP_NE_BUILD_A },
+	/* AXIS_Y: road ground = SPR_ROAD_Y; shelter is thin in X, long in Y, on the NE edge. */
+	{  0,  3, 0,  1, 11, 10, SPR_BUS_STOP_SE_BUILD_A },
 };
 
 static void DrawTile_Station(TileInfo *ti)
 {
-	/* Standard bus stop: StationGfx (m5) is the DiagDirection 0..3 (see MakeRoadStop/
-	 * GetRoadStopDir). Draw the paved ground sprite, then the 3 building sprites. */
-	DiagDirection dir = (DiagDirection)(GetStationGfx(ti->tile) & 3);
+	/* Drive-through bus stop: StationGfx (m5) is GFX_TRUCK_BUS_DRIVETHROUGH_OFFSET (4) + Axis,
+	 * so bit 0 of the gfx is the road Axis (0 = AXIS_X, 1 = AXIS_Y). See MakeDriveThroughRoadStop. */
+	Axis axis = (Axis)(GetStationGfx(ti->tile) & 1);
 
-	DrawGroundSprite(SPR_BUS_STOP_NE_GROUND + dir, PAL_NONE);
+	/* 1) Straight-road GROUND sprite so the road visibly runs THROUGH the tile, matching the
+	 *    adjacent MP_ROAD tiles (AXIS_X -> SPR_ROAD_X 1333, AXIS_Y -> SPR_ROAD_Y 1332). */
+	DrawGroundSprite(axis == AXIS_X ? SPR_ROAD_X : SPR_ROAD_Y, PAL_NONE);
 
-	const R1BusSeq *seq = _r1_bus_stop_seq[dir];
-	for (int i = 0; i < 3; i++) {
-		AddSortableSpriteToDraw(seq[i].img, PAL_NONE,
-			ti->x + seq[i].dx, ti->y + seq[i].dy,
-			seq[i].sx, seq[i].sy, seq[i].sz, ti->z + seq[i].dz);
-	}
+	/* 2) One base bus-stop BUILD sprite as a shelter beside the carriageway (never over it). */
+	const R1ShelterSeq &s = _r1_shelter_seq[axis];
+	AddSortableSpriteToDraw(s.img, PAL_NONE,
+		ti->x + s.dx, ti->y + s.dy,
+		s.sx, s.sy, s.sz, ti->z + s.dz);
 }
 
 static int GetSlopePixelZ_Station(TileIndex tile, uint x, uint y)
@@ -131,13 +125,18 @@ extern const TileTypeProcs _tile_type_station_procs = {
 };
 
 /* ============================================================================
- * R1 driver glue: write a REAL MP_STATION road-stop (bus) tile so DrawTile_Station
- * above actually fires in the viewport. Call at the end of a bus route.
+ * R1 driver glue: write a REAL MP_STATION DRIVE-THROUGH road-stop (bus) tile so
+ * DrawTile_Station above actually fires in the viewport. Call at the end of a bus route.
  *   tile          — MP_ROAD (or clear) tile to convert; typically the route's last tile.
  *   station_index — the owning Station::index (StationID). See r1_town_station_index.
- *   axis          — orientation: taken as the bus-stop DiagDirection (0=NE,1=SE,2=SW,3=NW).
- * Owner is _local_company to match the Station object (so the viewport uses the company
- * palette). tram roadtype is INVALID_ROADTYPE (no tram). Defensive: bounds-checks the tile.
+ *   axis          — the ROAD AXIS the stop sits on: 0 = AXIS_X (road runs SW<->NE),
+ *                   1 = AXIS_Y (road runs SE<->NW). A drive-through stop PRESERVES the
+ *                   road along this axis in BOTH directions, so it does NOT block the
+ *                   street — pass the same axis the underlying road runs.
+ * Station owner is _local_company (so the viewport uses the company palette); the ROAD
+ * keeps its existing owner (read BEFORE converting) so through-traffic ownership is intact,
+ * falling back to OWNER_TOWN for our town-associated inter-town roads. tram roadtype is
+ * INVALID_ROADTYPE (no tram). Defensive: bounds-checks the tile.
  * ============================================================================ */
 extern "C" void r1_place_bus_stop(unsigned tile, unsigned station_index, int axis)
 {
@@ -145,7 +144,12 @@ extern "C" void r1_place_bus_stop(unsigned tile, unsigned station_index, int axi
 	if (t >= MapSize()) return;              // out of range
 	if (IsTileType(t, MP_VOID)) return;      // never write over the map border
 
-	DiagDirection d = (DiagDirection)(((unsigned)axis) & 3);
-	MakeRoadStop(t, _local_company, (StationID)station_index,
-	             ROADSTOP_BUS, ROADTYPE_ROAD, INVALID_ROADTYPE, d);
+	/* Preserve the road's existing owner if this is already a normal road tile; else the
+	 * road is town-associated (our inter-town network) so OWNER_TOWN is the right owner. */
+	Owner road_owner = IsTileType(t, MP_ROAD) ? GetRoadOwner(t, RTT_ROAD) : OWNER_TOWN;
+
+	Axis a = (Axis)(((unsigned)axis) & 1);
+	MakeDriveThroughRoadStop(t, _local_company /*station*/, road_owner /*road*/,
+	                         INVALID_OWNER /*tram*/, (StationID)station_index,
+	                         ROADSTOP_BUS, ROADTYPE_ROAD, INVALID_ROADTYPE, a);
 }
