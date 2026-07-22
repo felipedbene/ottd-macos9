@@ -448,40 +448,47 @@ extern "C" void r1_build_world(void)
     g_live = true;   // the render loop now ticks the engine each frame (r1_tick)
     g_full_dirty = true;  // force the first full frame to draw
 
-    // Each bus runs an INTER-TOWN route: centre town (0) <-> a corner (bus 4 doubles the {0,1} run).
-    // The BFS pathfinder seeds the initial route between the two stations' road tiles; the order
-    // chain (attached at lazy Vehicle creation) + the r1_bus_move re-path then drive it autonomously
-    // A<->B, picking its own road each leg. If a pair isn't road-connected (water gap / no road tile)
-    // the bus falls back to the old single-town ping-pong so it's never stranded.
-    static const int R1_BUS_PAIR[R1_NBUS][2] = { {0,1}, {0,2}, {0,3}, {0,4}, {0,1} };
+    // R1-93: which corners are actually road-reachable from the centre? (the pathfinder is ground
+    // truth). Assign ALL buses ROUND-ROBIN over ONLY the connected corners, so none is stranded in
+    // a tiny single-town loop (R1-92 left buses to water-blocked corners doing a lost len=3 ping-pong).
+    unsigned probe[64];
+    int conn[4], ncon = 0;
+    for (uint c = 1; c < lengthof(R1_TOWNS); c++)
+        if (rt[0] != INVALID_TILE && rt[c] != INVALID_TILE &&
+            r1_road_path((unsigned)rt[0], (unsigned)rt[c], probe, 64) >= 2)
+            conn[ncon++] = (int)c;
+    ottd_log("R1-93: %d/%d corners road-connected to centre", ncon, (int)lengthof(R1_TOWNS) - 1);
+
+    int stops_placed = 0;
     for (uint i = 0; i < R1_NBUS; i++) {
         R1Bus &b = g_bus[i];
         b.len = 0; b.i = 0; b.prog = 0; b.dir = 1;
         b.sa = b.sb = 0xFFFF; b.orders_done = false;
         b.order_leg = 1;   // route drives A(centre) -> B(corner) = order index 1 (sb)
-        int A = R1_BUS_PAIR[i][0], B = R1_BUS_PAIR[i][1];
-        int n = (rt[A] != INVALID_TILE && rt[B] != INVALID_TILE)
-                ? r1_road_path((unsigned)rt[A], (unsigned)rt[B], (unsigned *)b.route, 64) : 0;
-        if (n < 2) {   // not road-connected -> single-town fallback (old behaviour, never stranded)
+        if (ncon == 0) {   // no inter-town roads at all -> old single-town behaviour
             r1_trace_route(b, (int)R1_TOWNS[i].x, (int)R1_TOWNS[i].y);
-            b.sa = r1_town_station_index((unsigned)tid[A]);
-            b.sb = r1_town_station_index((unsigned)tid[B]);
-            ottd_log("R1-92: bus%u FALLBACK single-town len=%d", i, b.len);
             continue;
         }
+        int A = 0, B = conn[i % ncon];   // centre -> a CONNECTED corner (round-robin)
+        int n = r1_road_path((unsigned)rt[A], (unsigned)rt[B], (unsigned *)b.route, 64);
+        if (n < 2) { r1_trace_route(b, (int)R1_TOWNS[i].x, (int)R1_TOWNS[i].y); continue; }
         b.len = n;
         b.sa = r1_town_station_index((unsigned)tid[A]);   // centre station (order index 0)
         b.sb = r1_town_station_index((unsigned)tid[B]);   // corner station (order index 1)
-        // Visible bus-stop at the corner end, oriented toward the road it's approached from (R1-90 rule).
+        // Visible bus-stop at the CORNER end (a leaf tile = single approach, always safe to convert;
+        // the centre is a shared multi-spoke hub, so converting it would break other buses' exit).
         if (b.sb != 0xFFFF && b.len >= 2) {
             TileIndex endt = b.route[b.len - 1], prev = b.route[b.len - 2];
             int dx = (int)TileX(prev) - (int)TileX(endt);
             int dy = (int)TileY(prev) - (int)TileY(endt);
             int axis = (dx < 0) ? 0 : (dy > 0) ? 1 : (dx > 0) ? 2 : 3;
             r1_place_bus_stop((unsigned)endt, b.sb, axis);
+            stops_placed++;
+            ottd_log("R1-93: bus%u town0->town%d len=%d STOP at (%d,%d) tiletype=%d",
+                     i, B, n, (int)TileX(endt), (int)TileY(endt), (int)GetTileType(endt));
         }
-        ottd_log("R1-92: bus%u route town%d->town%d len=%d sa=%u sb=%u", i, A, B, n, b.sa, b.sb);
     }
+    ottd_log("R1-93: %d bus stops placed (Ctrl+drag to a corner to see them)", stops_placed);
 
     // Place the industries on their flat pads (bare grass only). index=0 is a dummy —
     // our minimal proc draws from gfx alone and never touches the Industry pool.
