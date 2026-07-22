@@ -51,17 +51,15 @@
  * cause of the "invisible stop" + on-scroll smearing). Index by Axis: [0]=AXIS_X, [1]=AXIS_Y. */
 struct R1SeqLine { int8 dx, dy, dz; uint8 sx, sy, sz; SpriteID img; };
 
-static const R1SeqLine _r1_stop_build[2][3] = {
-	{	/* AXIS_X (road runs SW<->NE, ground = SPR_ROAD_X): the NE bay building. */
-		{  2,  0, 0, 11,  1, 10, SPR_BUS_STOP_NE_BUILD_A },
-		{ 13,  0, 0,  3, 16, 10, SPR_BUS_STOP_NE_BUILD_B },
-		{  0, 13, 0, 13,  3, 10, SPR_BUS_STOP_NE_BUILD_C },
-	},
-	{	/* AXIS_Y (road runs SE<->NW, ground = SPR_ROAD_Y): the SE bay building. */
-		{  0,  3, 0,  1, 11, 10, SPR_BUS_STOP_SE_BUILD_A },
-		{  0,  0, 0, 16,  3, 10, SPR_BUS_STOP_SE_BUILD_B },
-		{ 13,  3, 0,  3, 13, 10, SPR_BUS_STOP_SE_BUILD_C },
-	},
+/* ONE shelter piece per axis, hugging the tile EDGE so it sits BESIDE the carriageway and does NOT
+ * cover the road (drawing all 3 bay parts covered the street). BUILD_A is the thin edge wall in the
+ * classic bay layout (station_land.h _datas_71/_72). RECOLOURED (these are PALETTE_MODIFIER_COLOUR
+ * sprites — PAL_NONE renders index garbage, which was the invisible-stop bug). Index by Axis. */
+static const R1SeqLine _r1_stop_shelter[2] = {
+	/* AXIS_X (road runs SW<->NE, ground = SPR_ROAD_X): thin wall along X on the NW edge. */
+	{  1,  0, 0, 14,  1, 12, SPR_BUS_STOP_NE_BUILD_A },
+	/* AXIS_Y (road runs SE<->NW, ground = SPR_ROAD_Y): thin wall along Y on the NE edge. */
+	{  0,  1, 0,  1, 14, 12, SPR_BUS_STOP_SE_BUILD_A },
 };
 
 static void DrawTile_Station(TileInfo *ti)
@@ -70,16 +68,14 @@ static void DrawTile_Station(TileInfo *ti)
 	 * so bit 0 of the gfx is the road Axis (0 = AXIS_X, 1 = AXIS_Y). See MakeDriveThroughRoadStop. */
 	Axis axis = (Axis)(GetStationGfx(ti->tile) & 1);
 
-	/* 1) Straight-road GROUND so the road visibly runs THROUGH the tile (drive-through: the bus
-	 *    drives ONTO it, not blocked). AXIS_X -> SPR_ROAD_X (1333), AXIS_Y -> SPR_ROAD_Y (1332). */
+	/* 1) Straight-road GROUND so the road runs THROUGH the tile, UNBLOCKED (drive-through: the bus
+	 *    drives ONTO it). AXIS_X -> SPR_ROAD_X (1333), AXIS_Y -> SPR_ROAD_Y (1332). */
 	DrawGroundSprite(axis == AXIS_X ? SPR_ROAD_X : SPR_ROAD_Y, PAL_NONE);
 
-	/* 2) The full 3-part shelter building, RECOLOURED (orange = clearly visible on any terrain). */
-	PaletteID pal = GENERAL_SPRITE_COLOUR(COLOUR_ORANGE);
-	for (int i = 0; i < 3; i++) {
-		const R1SeqLine &s = _r1_stop_build[axis][i];
-		AddSortableSpriteToDraw(s.img, pal, ti->x + s.dx, ti->y + s.dy, s.sx, s.sy, s.sz, ti->z + s.dz);
-	}
+	/* 2) A single edge shelter beside (not over) the carriageway, RECOLOURED so it's visible. */
+	const R1SeqLine &s = _r1_stop_shelter[axis];
+	AddSortableSpriteToDraw(s.img, GENERAL_SPRITE_COLOUR(COLOUR_ORANGE),
+		ti->x + s.dx, ti->y + s.dy, s.sx, s.sy, s.sz, ti->z + s.dz);
 }
 
 static int GetSlopePixelZ_Station(TileIndex tile, uint x, uint y)

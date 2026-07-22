@@ -1099,15 +1099,10 @@ struct R1MainWindow : Window {
         this->viewport->scrollpos_y += ScaleByZoom(delta.y, this->viewport->zoom);
         this->viewport->dest_scrollpos_x = this->viewport->scrollpos_x;
         this->viewport->dest_scrollpos_y = this->viewport->scrollpos_y;
-        // R1-96: bypass SetViewportPosition's in-place GfxScroll copy-optimisation. Its VERTICAL
-        // cross-row memmove of _screen — which IS the single QuickDraw present buffer (no back-buffer
-        // on the Mac driver) — tears/leaves artifacts on up/down pan (horizontal within-row shifts
-        // are fine). Keeping virtual_* == scrollpos makes SetViewportPosition compute _vp_move_offs
-        // {0,0} and early-return before GfxScroll; MarkWholeScreenDirty then repaints the whole
-        // viewport from the world via the SAME clean path bus movement / town growth already use.
-        this->viewport->virtual_left = this->viewport->scrollpos_x;
-        this->viewport->virtual_top  = this->viewport->scrollpos_y;
-        MarkWholeScreenDirty();
+        // R1-98: the actual anti-tearing fix is in viewport.cpp (build.sh patch) — DoSetViewportPosition
+        // is forced to FULL-redraw instead of GfxScroll's in-place _screen memmove (which tears on the
+        // Mac's single QuickDraw buffer, vertical especially). That handles the map-edge clamp case my
+        // earlier virtual_* sync could not, so this override just moves scrollpos.
     }
 };
 

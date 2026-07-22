@@ -24,7 +24,10 @@ INCS=(-I"$COMPAT" -I"$OTTD/src" -I"$OTTD/src/3rdparty" -I"$OTTD/src/3rdparty/squ
 # Real OpenTTD engine TUs (recompiled with the merge flags).
 # viewport.cpp = the game's real renderer; void_cmd.cpp = the MP_VOID tile proc it
 # dereferences for off-map/border tiles (replaces the zeroed void stub in deadpools).
-SRC_TUS=(date.cpp core/pool_func.cpp town_cmd.cpp landscape.cpp clear_cmd.cpp road_cmd.cpp road_map.cpp viewport.cpp void_cmd.cpp gfx_layout.cpp fontcache.cpp fontcache/spritefontcache.cpp tree_cmd.cpp townname.cpp widgets/dropdown.cpp toolbar_gui.cpp cargotype.cpp)
+SRC_TUS=(date.cpp core/pool_func.cpp town_cmd.cpp landscape.cpp clear_cmd.cpp road_cmd.cpp road_map.cpp void_cmd.cpp gfx_layout.cpp fontcache.cpp fontcache/spritefontcache.cpp tree_cmd.cpp townname.cpp widgets/dropdown.cpp toolbar_gui.cpp cargotype.cpp)
+# viewport.cpp is compiled from a PATCHED copy (below): DoSetViewportPosition forced to full-redraw
+# instead of GfxScroll's in-place _screen memmove (which tears the Mac's single QuickDraw buffer on
+# drag-to-pan, vertical especially). Handled separately so the sed patch applies.
 # M1 support TUs (shims/stubs/pools) — engine-calibrated, minus the gfx-owned dups.
 # m1_viewport_stubs = no-op window/vehicle/sign surface viewport.cpp links against.
 # m1_text_stubs = the 4 symbols the real font/layout TUs need (config/utf8/glyphs).
@@ -41,6 +44,12 @@ compile_all() {
     echo "  CXX $f"; $GXX "${CXXFLAGS[@]}" "${INCS[@]}" -c "$M1/$f.cpp" -o "$R1/obj/$f.o"
   done
   echo "  CC  m1_deadpools"; $GCC -DR1_MERGE -DR1_STRINGS -c "$M1/m1_deadpools.c" -o "$R1/obj/m1_deadpools.o"
+  echo "== viewport.cpp (DoSetViewportPosition forced to full-redraw: no GfxScroll in-place _screen"
+  echo "   memmove, which tears the Mac's single QuickDraw buffer on drag-to-pan, vertical especially) =="
+  # Force the 'fully_outside' full-redraw branch for EVERY scroll by making its guard always true.
+  sed 's#if (abs(xo) >= width || abs(yo) >= height) {#if (true) { /* R1: always full-redraw, no GfxScroll tearing */#' \
+      "$OTTD/src/viewport.cpp" > "$R1/obj/viewport_patched.cpp"
+  $GXX "${CXXFLAGS[@]}" "${INCS[@]}" -c "$R1/obj/viewport_patched.cpp" -o "$R1/obj/viewport.o"
   echo "== window system (widget.cpp; window.cpp with the broken steady_clock sed'd to R1SteadyClock) =="
   $GXX "${CXXFLAGS[@]}" "${INCS[@]}" -c "$OTTD/src/widget.cpp" -o "$R1/obj/widget.o"
   sed 's/std::chrono::steady_clock/R1SteadyClock/g' "$OTTD/src/window.cpp" > "$R1/obj/window_patched.cpp"
