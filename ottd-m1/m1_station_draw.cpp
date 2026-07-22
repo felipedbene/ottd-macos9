@@ -36,24 +36,32 @@
 #include "road_map.h"          /* GetRoadOwner, RTT_ROAD */
 #include "company_func.h"      /* _local_company */
 
+#include "sprite.h"            /* GENERAL_SPRITE_COLOUR (recolour palette for the building) */
 #include "table/strings.h"
 #include "table/sprites.h"
 
 #include "safeguards.h"
 
-/* One roadside-shelter line of a fake drive-through stop (subset of DrawTileSeqStruct:
- * the fields we use). ONE base bus-stop BUILD sprite per road axis, offset to the side
- * of the carriageway so it reads as a shelter beside a through-road. Box dimensions are
- * transcribed from table/station_land.h (the classic bay bus stop BUILD_A pieces), which
- * are thin walls running parallel to the road. PAL_NONE — base sprites need no recolour.
- * Index by Axis: [0] = AXIS_X (road runs SW<->NE), [1] = AXIS_Y (road runs SE<->NW). */
-struct R1ShelterSeq { int8 dx, dy, dz; uint8 sx, sy, sz; SpriteID img; };
+/* One building line of the classic bus-stop shelter (subset of DrawTileSeqStruct: the fields we
+ * use). We draw the FULL 3-part bay-stop BUILDING (A+B+C) over a through-road ground, so it reads
+ * as a real, VISIBLE shelter (a single thin part was near-invisible). Offsets/dims transcribed
+ * VERBATIM from table/station_land.h (_station_display_datas_71 = NE bay, _72 = SE bay). All sprites
+ * 2696-2705 are classic ogfx1_base.grf (< 4896). They are PALETTE_MODIFIER_COLOUR recolour sprites,
+ * so they MUST be drawn with a recolour palette (drawing them PAL_NONE renders index garbage — the
+ * cause of the "invisible stop" + on-scroll smearing). Index by Axis: [0]=AXIS_X, [1]=AXIS_Y. */
+struct R1SeqLine { int8 dx, dy, dz; uint8 sx, sy, sz; SpriteID img; };
 
-static const R1ShelterSeq _r1_shelter_seq[2] = {
-	/* AXIS_X: road ground = SPR_ROAD_X; shelter is thin in Y, long in X, on the NW edge. */
-	{  2,  0, 0, 11,  1, 10, SPR_BUS_STOP_NE_BUILD_A },
-	/* AXIS_Y: road ground = SPR_ROAD_Y; shelter is thin in X, long in Y, on the NE edge. */
-	{  0,  3, 0,  1, 11, 10, SPR_BUS_STOP_SE_BUILD_A },
+static const R1SeqLine _r1_stop_build[2][3] = {
+	{	/* AXIS_X (road runs SW<->NE, ground = SPR_ROAD_X): the NE bay building. */
+		{  2,  0, 0, 11,  1, 10, SPR_BUS_STOP_NE_BUILD_A },
+		{ 13,  0, 0,  3, 16, 10, SPR_BUS_STOP_NE_BUILD_B },
+		{  0, 13, 0, 13,  3, 10, SPR_BUS_STOP_NE_BUILD_C },
+	},
+	{	/* AXIS_Y (road runs SE<->NW, ground = SPR_ROAD_Y): the SE bay building. */
+		{  0,  3, 0,  1, 11, 10, SPR_BUS_STOP_SE_BUILD_A },
+		{  0,  0, 0, 16,  3, 10, SPR_BUS_STOP_SE_BUILD_B },
+		{ 13,  3, 0,  3, 13, 10, SPR_BUS_STOP_SE_BUILD_C },
+	},
 };
 
 static void DrawTile_Station(TileInfo *ti)
@@ -62,15 +70,16 @@ static void DrawTile_Station(TileInfo *ti)
 	 * so bit 0 of the gfx is the road Axis (0 = AXIS_X, 1 = AXIS_Y). See MakeDriveThroughRoadStop. */
 	Axis axis = (Axis)(GetStationGfx(ti->tile) & 1);
 
-	/* 1) Straight-road GROUND sprite so the road visibly runs THROUGH the tile, matching the
-	 *    adjacent MP_ROAD tiles (AXIS_X -> SPR_ROAD_X 1333, AXIS_Y -> SPR_ROAD_Y 1332). */
+	/* 1) Straight-road GROUND so the road visibly runs THROUGH the tile (drive-through: the bus
+	 *    drives ONTO it, not blocked). AXIS_X -> SPR_ROAD_X (1333), AXIS_Y -> SPR_ROAD_Y (1332). */
 	DrawGroundSprite(axis == AXIS_X ? SPR_ROAD_X : SPR_ROAD_Y, PAL_NONE);
 
-	/* 2) One base bus-stop BUILD sprite as a shelter beside the carriageway (never over it). */
-	const R1ShelterSeq &s = _r1_shelter_seq[axis];
-	AddSortableSpriteToDraw(s.img, PAL_NONE,
-		ti->x + s.dx, ti->y + s.dy,
-		s.sx, s.sy, s.sz, ti->z + s.dz);
+	/* 2) The full 3-part shelter building, RECOLOURED (orange = clearly visible on any terrain). */
+	PaletteID pal = GENERAL_SPRITE_COLOUR(COLOUR_ORANGE);
+	for (int i = 0; i < 3; i++) {
+		const R1SeqLine &s = _r1_stop_build[axis][i];
+		AddSortableSpriteToDraw(s.img, pal, ti->x + s.dx, ti->y + s.dy, s.sx, s.sy, s.sz, ti->z + s.dz);
+	}
 }
 
 static int GetSlopePixelZ_Station(TileIndex tile, uint x, uint y)
