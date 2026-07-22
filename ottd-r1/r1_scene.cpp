@@ -459,36 +459,44 @@ extern "C" void r1_build_world(void)
             conn[ncon++] = (int)c;
     ottd_log("R1-93: %d/%d corners road-connected to centre", ncon, (int)lengthof(R1_TOWNS) - 1);
 
-    int stops_placed = 0;
+    // Loop 1: PATH each bus (centre -> a connected corner). Done while every road tile is still
+    // MP_ROAD, so rt[0] (the shared hub) is a valid pathfinder start/end for ALL buses.
     for (uint i = 0; i < R1_NBUS; i++) {
         R1Bus &b = g_bus[i];
         b.len = 0; b.i = 0; b.prog = 0; b.dir = 1;
-        b.sa = b.sb = 0xFFFF; b.orders_done = false;
-        b.order_leg = 1;   // route drives A(centre) -> B(corner) = order index 1 (sb)
-        if (ncon == 0) {   // no inter-town roads at all -> old single-town behaviour
-            r1_trace_route(b, (int)R1_TOWNS[i].x, (int)R1_TOWNS[i].y);
-            continue;
-        }
+        b.sa = b.sb = 0xFFFF; b.orders_done = false; b.order_leg = 1;
+        if (ncon == 0) { r1_trace_route(b, (int)R1_TOWNS[i].x, (int)R1_TOWNS[i].y); continue; }
         int A = 0, B = conn[i % ncon];   // centre -> a CONNECTED corner (round-robin)
         int n = r1_road_path((unsigned)rt[A], (unsigned)rt[B], (unsigned *)b.route, 64);
         if (n < 2) { r1_trace_route(b, (int)R1_TOWNS[i].x, (int)R1_TOWNS[i].y); continue; }
         b.len = n;
-        b.sa = r1_town_station_index((unsigned)tid[A]);   // centre station (order index 0)
-        b.sb = r1_town_station_index((unsigned)tid[B]);   // corner station (order index 1)
-        // Visible bus-stop at the CORNER end (a leaf tile = single approach, always safe to convert;
-        // the centre is a shared multi-spoke hub, so converting it would break other buses' exit).
-        if (b.sb != 0xFFFF && b.len >= 2) {
-            TileIndex endt = b.route[b.len - 1], prev = b.route[b.len - 2];
-            int dx = (int)TileX(prev) - (int)TileX(endt);
-            int dy = (int)TileY(prev) - (int)TileY(endt);
+        b.sa = r1_town_station_index((unsigned)tid[A]);   // centre station (route[0])
+        b.sb = r1_town_station_index((unsigned)tid[B]);   // corner station (route[len-1])
+    }
+    // Loop 2: place the visible MP_STATION stops at BOTH ends of every route (the CENTRE hub AND the
+    // corner). Only NOW that all pathfinding is done can we convert tiles without breaking a route.
+    // The hub rt[0] is shared, so the GetTileType(MP_STATION) guard places each distinct tile once.
+    int stops_placed = 0;
+    for (uint i = 0; i < R1_NBUS; i++) {
+        R1Bus &b = g_bus[i];
+        if (b.len < 2) continue;
+        int idxs[2] = { b.len - 1, 0 };          // corner end, centre end
+        int nbs[2]  = { b.len - 2, 1 };          // the adjacent tile (for stop orientation)
+        unsigned sid[2] = { b.sb, b.sa };
+        for (int e = 0; e < 2; e++) {
+            if (sid[e] == 0xFFFF) continue;
+            TileIndex t0 = b.route[idxs[e]], t1 = b.route[nbs[e]];
+            if (GetTileType(t0) == MP_STATION) continue;   // already a stop (shared hub) -> once
+            int dx = (int)TileX(t1) - (int)TileX(t0);
+            int dy = (int)TileY(t1) - (int)TileY(t0);
             int axis = (dx < 0) ? 0 : (dy > 0) ? 1 : (dx > 0) ? 2 : 3;
-            r1_place_bus_stop((unsigned)endt, b.sb, axis);
+            r1_place_bus_stop((unsigned)t0, sid[e], axis);
             stops_placed++;
-            ottd_log("R1-93: bus%u town0->town%d len=%d STOP at (%d,%d) tiletype=%d",
-                     i, B, n, (int)TileX(endt), (int)TileY(endt), (int)GetTileType(endt));
+            ottd_log("R1-94: stop%d at (%d,%d) type=%d", stops_placed,
+                     (int)TileX(t0), (int)TileY(t0), (int)GetTileType(t0));
         }
     }
-    ottd_log("R1-93: %d bus stops placed (Ctrl+drag to a corner to see them)", stops_placed);
+    ottd_log("R1-94: %d bus stops placed (centre hub + corners)", stops_placed);
 
     // Place the industries on their flat pads (bare grass only). index=0 is a dummy —
     // our minimal proc draws from gfx alone and never touches the Industry pool.
@@ -712,33 +720,13 @@ static bool r1_bus_move(R1Bus &b, int mult)
         if (++b.prog >= 16) {
             b.prog = 0;
             b.i += b.dir;
-            if (b.i >= b.len - 1) {
-                b.i = b.len - 1;
-                r1_bus_arrive(b);                       // pickup/deliver at the destination station
-                // R1-91: ORDER-DRIVEN re-path. Advance to the bus's other order (m1_order.cpp chain)
-                // and BFS a fresh road route to that Station (m1_pathfind.cpp) — the bus picks its own
-                // path each leg instead of ping-ponging a fixed route. Fallback to the old bounce if
-                // there's no order chain / no road path, so a bus is never stranded.
-                Vehicle *v = b.v;
-                bool repathed = false;
-                if (v != nullptr && v->orders != nullptr && v->GetNumOrders() >= 2) {
-                    int next_leg = b.order_leg ^ 1;                 // toggle A<->B
-                    Order *o = v->GetOrder(next_leg);
-                    if (o != nullptr && o->IsType(OT_GOTO_STATION)) {
-                        StationID dest = (StationID)o->GetDestination();
-                        v->current_order.MakeGoToStation(dest);     // keep current_order coherent
-                        TileIndex src = b.route[b.len - 1];         // copy BEFORE r1_road_path overwrites route[]
-                        TileIndex dst = Station::Get(dest)->xy;
-                        int n = r1_road_path((unsigned)src, (unsigned)dst, (unsigned *)b.route, 64);
-                        if (n >= 2) {
-                            b.len = n; b.i = 0; b.prog = 0; b.dir = 1;
-                            b.order_leg = next_leg;
-                            repathed = true;
-                        }
-                    }
-                }
-                if (!repathed) b.dir = -1;               // no order/path -> ping-pong back (route[] intact on fail)
-            }
+            // R1-94: the bus PING-PONGS along the inter-town route the pathfinder found ONCE at setup
+            // (r1_road_path). For a fixed two-station route this is equivalent to re-pathing each leg
+            // (the roads don't change) but far simpler AND it lets BOTH endpoints be real MP_STATION
+            // stops: neither end is ever used as a pathfinder START (which a single-axis bay stop would
+            // break). It arrives (pickup/deliver) at each end. The route itself IS autonomous — the BFS
+            // chose the roads between the two real stations at setup.
+            if (b.i >= b.len - 1) { b.i = b.len - 1; b.dir = -1; r1_bus_arrive(b); }
             else if (b.i <= 0)    { b.i = 0;         b.dir = 1; r1_bus_arrive(b); }
         }
     }
