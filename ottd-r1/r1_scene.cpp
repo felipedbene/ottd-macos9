@@ -250,6 +250,8 @@ struct R1Bus {
 static R1Bus g_bus[R1_NBUS];             // zero-init: len=0 (no route) until traced
 static void r1_trace_route(R1Bus &b, int cx, int cy);  // defined below (bus route)
 static Town *r1_town_near(TileIndex t);                // defined below (nearest town to a tile)
+static TileIndex r1_road_tile_near(int cx, int cy, int rad);          // R1-92: nearest MP_ROAD tile
+static int r1_build_road_path(int x0, int y0, int x1, int y1);        // R1-92: lay an inter-town road
 static void r1_make_viewport(int scroll_x, int scroll_y, Viewport *vp);  // defined below (draw)
 // Tap-to-zoom cycles this; the draw + pick + bus read it. NORMAL=0..OUT_8X=3.
 static ZoomLevel g_zoom = ZOOM_LVL_OUT_4X;
@@ -417,50 +419,68 @@ extern "C" void r1_build_world(void)
         Command<CMD_TOWN_GROWTH_RATE>::Do(DC_EXEC, (TownID)t->index, (uint16)80);  // slow: rare full-screen repaints -> no stutter (towns already sizeable from the seed)
         founded++;
     }
-    // R1-83: one REAL pooled Station (+ RoadStop) per town, keyed by TownID. INVISIBLE (no
-    // MP_STATION tile), so nothing draws — the bus records its pickup on the real Station's
-    // goods[CT_PASSENGERS] (r1_bus_arrive) instead of only reading Town::supplied.
-    for (const Town *t : Town::Iterate()) r1_make_town_station((unsigned)t->index, (unsigned)t->xy);
+    // ===== R1-92: inter-town ROAD network + inter-town autonomous bus routes =====
+    // Star topology: a road spoke from the centre town (0) out to each corner town, so every town is
+    // road-connected. Map each R1_TOWNS slot to its real Town + a nearby ROAD tile (rt[i]); the
+    // station anchors on that road tile so the BFS pathfinder can actually reach it (R1-91 targeted
+    // the town CENTRE = an MP_HOUSE the BFS couldn't land on -> every bus fell back to ping-pong).
+    TownID    tid[R1_NBUS];
+    TileIndex rt[R1_NBUS];
+    for (uint i = 0; i < lengthof(R1_TOWNS); i++) {
+        Town *t = r1_town_near(TileXY((uint)R1_TOWNS[i].x, (uint)R1_TOWNS[i].y));
+        tid[i]  = (t != nullptr) ? (TownID)t->index : (TownID)0;
+        rt[i]   = r1_road_tile_near((int)R1_TOWNS[i].x, (int)R1_TOWNS[i].y, 8);
+    }
+    // Lay the spokes: each corner town's road tile -> the centre town's road tile (still OWNER_DEITY,
+    // as the town roads were). Where a spoke meets a town's own roads they auto-connect.
+    int road_laid = 0;
+    for (uint i = 1; i < lengthof(R1_TOWNS); i++)
+        if (rt[0] != INVALID_TILE && rt[i] != INVALID_TILE)
+            road_laid += r1_build_road_path((int)TileX(rt[i]), (int)TileY(rt[i]),
+                                            (int)TileX(rt[0]), (int)TileY(rt[0]));
+    ottd_log("R1-92: inter-town roads laid=%d tiles", road_laid);
+
+    // One REAL pooled Station per town, anchored on its ROAD tile rt[i] (so Station::xy is reachable).
+    for (uint i = 0; i < lengthof(R1_TOWNS); i++)
+        if (rt[i] != INVALID_TILE) r1_make_town_station((unsigned)tid[i], (unsigned)rt[i]);
+
     _current_company = OWNER_NONE;
     g_live = true;   // the render loop now ticks the engine each frame (r1_tick)
     g_full_dirty = true;  // force the first full frame to draw
-    // R1-78: a FLEET — one bus per town, each tracing a route from its OWN town's roads.
-    // Any town whose roads are too short traces len<2 and its bus no-ops harmlessly.
-    for (uint i = 0; i < R1_NBUS; i++)
-        r1_trace_route(g_bus[i], (int)R1_TOWNS[i].x, (int)R1_TOWNS[i].y);
 
-    // R1-89 step 2+3: resolve each bus's two endpoint stations, make the route-END a VISIBLE
-    // bus-stop tile (MP_STATION — routes are already traced, so converting the tile can't disturb
-    // the pre-stored animation), and remember the StationIDs so the order chain can be attached to
-    // the Vehicle once it's lazily created (r1_update_vehicle). r1_town_near maps a tile to its
-    // nearest town; that town's real pooled Station (R1-83) carries the index the tile stores.
+    // Each bus runs an INTER-TOWN route: centre town (0) <-> a corner (bus 4 doubles the {0,1} run).
+    // The BFS pathfinder seeds the initial route between the two stations' road tiles; the order
+    // chain (attached at lazy Vehicle creation) + the r1_bus_move re-path then drive it autonomously
+    // A<->B, picking its own road each leg. If a pair isn't road-connected (water gap / no road tile)
+    // the bus falls back to the old single-town ping-pong so it's never stranded.
+    static const int R1_BUS_PAIR[R1_NBUS][2] = { {0,1}, {0,2}, {0,3}, {0,4}, {0,1} };
     for (uint i = 0; i < R1_NBUS; i++) {
         R1Bus &b = g_bus[i];
+        b.len = 0; b.i = 0; b.prog = 0; b.dir = 1;
         b.sa = b.sb = 0xFFFF; b.orders_done = false;
-        b.order_leg = 1;   // seeded route drives route[0](town A) -> route[len-1](town B) = order index 1 (sb)
-        if (b.len < 1) continue;
-        Town *ta = r1_town_near(b.route[0]);
-        Town *tb = r1_town_near(b.route[b.len - 1]);
-        if (ta != nullptr) b.sa = r1_town_station_index((unsigned)ta->index);
-        if (tb != nullptr) b.sb = r1_town_station_index((unsigned)tb->index);
-        if (b.sb != 0xFFFF) {
-            // R1-90: orient the bay stop by the ROAD, not a fixed NE. The entrance must face the
-            // road tile the bus arrives from (route[len-2]); a hardcoded axis made every stop face
-            // NE, so stops on differently-running roads looked inverted. DiagDirection = delta from
-            // the end tile toward the previous route tile (OTTD _tileoffs_by_diagdir: NE{-1,0}
-            // SE{0,+1} SW{+1,0} NW{0,-1}).
-            int axis = 0;
-            if (b.len >= 2) {
-                TileIndex endt = b.route[b.len - 1], prev = b.route[b.len - 2];
-                int dx = (int)TileX(prev) - (int)TileX(endt);
-                int dy = (int)TileY(prev) - (int)TileY(endt);
-                if      (dx < 0) axis = 0;   // DIAGDIR_NE
-                else if (dy > 0) axis = 1;   // DIAGDIR_SE
-                else if (dx > 0) axis = 2;   // DIAGDIR_SW
-                else             axis = 3;   // DIAGDIR_NW
-            }
-            r1_place_bus_stop((unsigned)b.route[b.len - 1], b.sb, axis);
+        b.order_leg = 1;   // route drives A(centre) -> B(corner) = order index 1 (sb)
+        int A = R1_BUS_PAIR[i][0], B = R1_BUS_PAIR[i][1];
+        int n = (rt[A] != INVALID_TILE && rt[B] != INVALID_TILE)
+                ? r1_road_path((unsigned)rt[A], (unsigned)rt[B], (unsigned *)b.route, 64) : 0;
+        if (n < 2) {   // not road-connected -> single-town fallback (old behaviour, never stranded)
+            r1_trace_route(b, (int)R1_TOWNS[i].x, (int)R1_TOWNS[i].y);
+            b.sa = r1_town_station_index((unsigned)tid[A]);
+            b.sb = r1_town_station_index((unsigned)tid[B]);
+            ottd_log("R1-92: bus%u FALLBACK single-town len=%d", i, b.len);
+            continue;
         }
+        b.len = n;
+        b.sa = r1_town_station_index((unsigned)tid[A]);   // centre station (order index 0)
+        b.sb = r1_town_station_index((unsigned)tid[B]);   // corner station (order index 1)
+        // Visible bus-stop at the corner end, oriented toward the road it's approached from (R1-90 rule).
+        if (b.sb != 0xFFFF && b.len >= 2) {
+            TileIndex endt = b.route[b.len - 1], prev = b.route[b.len - 2];
+            int dx = (int)TileX(prev) - (int)TileX(endt);
+            int dy = (int)TileY(prev) - (int)TileY(endt);
+            int axis = (dx < 0) ? 0 : (dy > 0) ? 1 : (dx > 0) ? 2 : 3;
+            r1_place_bus_stop((unsigned)endt, b.sb, axis);
+        }
+        ottd_log("R1-92: bus%u route town%d->town%d len=%d sa=%u sb=%u", i, A, B, n, b.sa, b.sb);
     }
 
     // Place the industries on their flat pads (bare grass only). index=0 is a dummy —
@@ -561,6 +581,57 @@ static void r1_trace_route(R1Bus &b, int cx, int cy)
         came = ReverseDiagDir(best);
     }
     ottd_log("R1: bus route len=%d (from %d,%d)", b.len, cx, cy);
+}
+
+// ===== R1-92: inter-town road network so autonomous buses have somewhere to go =====
+// Nearest MP_ROAD tile within Chebyshev radius `rad` of (cx,cy), scanned ring-by-ring (so the
+// closest road wins). INVALID_TILE if none — the caller then falls back to single-town ping-pong.
+static TileIndex r1_road_tile_near(int cx, int cy, int rad)
+{
+    for (int r = 0; r <= rad; r++)
+        for (int dy = -r; dy <= r; dy++)
+            for (int dx = -r; dx <= r; dx++) {
+                if ((dx < 0 ? -dx : dx) != r && (dy < 0 ? -dy : dy) != r) continue;   // ring perimeter only
+                int x = cx + dx, y = cy + dy;
+                if (x < 1 || x >= (int)MapMaxX() || y < 1 || y >= (int)MapMaxY()) continue;
+                TileIndex t = TileXY((uint)x, (uint)y);
+                if (IsTileType(t, MP_ROAD)) return t;
+            }
+    return INVALID_TILE;
+}
+
+// DiagDirection from adjacent tile a -> b (OTTD _tileoffs_by_diagdir: +X=SW, -X=NE, +Y=SE, -Y=NW).
+static DiagDirection r1_diagdir_between(TileIndex a, TileIndex b)
+{
+    int dx = (int)TileX(b) - (int)TileX(a), dy = (int)TileY(b) - (int)TileY(a);
+    if (dx > 0) return DIAGDIR_SW;
+    if (dx < 0) return DIAGDIR_NE;
+    if (dy > 0) return DIAGDIR_SE;
+    return DIAGDIR_NW;
+}
+
+// Lay a connected road along an L-path (X first, then Y) between two existing road tiles, via the
+// real CMD_BUILD_ROAD (auto-clears grass/trees + connects to adjacent town roads — same call the
+// click-to-build path uses). Stops at water (no bridges); the pathfinder tolerates the gap by
+// falling that bus back to a single-town route. Returns the number of segments laid.
+static int r1_build_road_path(int x0, int y0, int x1, int y1)
+{
+    int laid = 0, x = x0, y = y0;
+    TileIndex prev = TileXY((uint)x, (uint)y);
+    while (x != x1 || y != y1) {
+        int nx = x, ny = y;
+        if (x != x1) nx = x + (x1 > x ? 1 : -1);
+        else         ny = y + (y1 > y ? 1 : -1);
+        TileIndex cur = TileXY((uint)nx, (uint)ny);
+        if (IsTileType(cur, MP_WATER)) break;
+        DiagDirection d = r1_diagdir_between(prev, cur);
+        Command<CMD_BUILD_ROAD>::Do(DC_EXEC | DC_AUTO, prev, DiagDirToRoadBits(d),
+                                    ROADTYPE_ROAD, DRD_NONE, (TownID)0);
+        Command<CMD_BUILD_ROAD>::Do(DC_EXEC | DC_AUTO, cur, DiagDirToRoadBits(ReverseDiagDir(d)),
+                                    ROADTYPE_ROAD, DRD_NONE, (TownID)0);
+        prev = cur; x = nx; y = ny; laid++;
+    }
+    return laid;
 }
 
 // R1-77: the bus EARNS money — a hand-driven pickup->deliver fare (no Station/cargo TU).
