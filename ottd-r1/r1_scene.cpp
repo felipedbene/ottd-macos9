@@ -246,6 +246,7 @@ struct R1Bus {
     unsigned sa, sb;                     // R1-89: StationID of the two route-endpoint towns (0xFFFF=none)
     bool orders_done;                    // R1-89: real order chain attached to v exactly once
     int  order_leg;                      // R1-91: which order (0=A,1=B) the bus is currently driving toward
+    int  dwell;                          // R1-101: frames left paused at a stop (loading/unloading)
 };
 static R1Bus g_bus[R1_NBUS];             // zero-init: len=0 (no route) until traced
 static void r1_trace_route(R1Bus &b, int cx, int cy);  // defined below (bus route)
@@ -736,6 +737,9 @@ static bool r1_bus_move(R1Bus &b, int mult)
     if (b.accum > MAX_BACKLOG) b.accum = MAX_BACKLOG;
     unsigned long substeps = b.accum / TICKS_PER_SUBSTEP;
     if (substeps == 0) return false;
+    // R1-101: DWELL at a stop — the bus sits still for a beat (visible loading/unloading) before
+    // moving on, instead of gliding through the station. Counts down one frame per would-be sub-step.
+    if (b.dwell > 0) { b.dwell--; b.accum = 0; return false; }
     substeps = 1;                                  // one sub-step per frame -> no visible jump
     b.accum -= TICKS_PER_SUBSTEP;                  // keep the remainder -> steady average speed
     for (unsigned long k = 0; k < substeps; k++) {
@@ -750,6 +754,8 @@ static bool r1_bus_move(R1Bus &b, int mult)
             // chose the roads between the two real stations at setup.
             if (b.i >= b.len - 1) { b.i = b.len - 1; b.dir = -1; r1_bus_arrive(b); }
             else if (b.i <= 0)    { b.i = 0;         b.dir = 1; r1_bus_arrive(b); }
+            // R1-101: landed on a drive-through stop tile -> pause to load/unload (~1.5s at 16fps).
+            if (IsTileType(b.route[b.i], MP_STATION)) b.dwell = 24;
         }
     }
     return true;
