@@ -69,6 +69,9 @@ extern "C" int r1_road_path(unsigned from_tile, unsigned to_tile, unsigned *out,
 // R1-91 real cargo (rung b, m1_station.cpp/m1_economy.cpp): a real CargoPacket on pickup; paid deliver.
 extern "C" void r1_station_add_cargo(unsigned townid, unsigned pax);
 extern "C" long r1_deliver_cargo(unsigned pax, unsigned dist);
+// R1-101 faithful loading: the bus takes real CargoPackets FROM a station; waiting-queue size.
+extern "C" unsigned r1_station_take_cargo(unsigned townid, unsigned want);
+extern "C" unsigned r1_station_waiting(unsigned townid);
 #include "command_func.h"
 #include "road_type.h"
 #include "road_map.h"
@@ -686,27 +689,31 @@ static Town *r1_town_near(TileIndex t)
     return best;
 }
 
-static void r1_bus_arrive(R1Bus &b)
+// R1-101: FAITHFUL load/unload at a stop tile (replaces the old route-end pickup/deliver). Loading
+// pulls REAL CargoPackets OUT of the town's station waiting queue into the bus (up to capacity);
+// unloading delivers the load + pays the fare. The boarding PAUSE (b.dwell) is PROPORTIONAL to the
+// passengers moved — a busy stop holds the bus longer, an empty one barely stops — mirroring
+// OpenTTD's LoadUnloadVehicle (which moves load_amount cargo/tick until full/empty).
+static const uint R1_BUS_CAP = 30;   // bus passenger capacity
+static void r1_bus_service(R1Bus &b)
 {
     if (b.len < 2) return;
     Town *t = r1_town_near(b.route[b.i]);
     if (t == nullptr) return;
     if (b.pax == 0) {
-        // PICK UP up to a bus-load from this town's real passenger supply (population>>3).
-        uint avail = t->supplied[CT_PASSENGERS].old_max;
-        b.pax = avail < 30 ? avail : 30;
-        t->supplied[CT_PASSENGERS].old_act += b.pax;   // feeds GetPercentTransported()
-        // R1-91: append a REAL CargoPacket to the town's Station goods[CT_PASSENGERS].cargo (rung b) —
-        // the waiting cargo now accumulates, so the station-list window's cargo-rating bars light up.
-        r1_station_add_cargo((unsigned)t->index, b.pax);
-        return;
+        // LOAD: take real waiting passengers from this station (removes real CargoPackets, drawing
+        // down the queue that the station-list cargo bars show).
+        unsigned got = r1_station_take_cargo((unsigned)t->index, R1_BUS_CAP);
+        if (got == 0) return;                            // nobody waiting -> don't stop
+        b.pax = got;
+        t->supplied[CT_PASSENGERS].old_act += got;       // feeds GetPercentTransported()
+        b.dwell = (int)got + 6;                          // proportional boarding pause (+ min)
+    } else {
+        // DELIVER: pay the fare (real GetTransportedGoodsIncome, m1_economy.cpp) + alighting pause.
+        r1_deliver_cargo(b.pax, (unsigned)b.len);
+        b.dwell = (int)b.pax + 6;
+        b.pax = 0;
     }
-    // DELIVER at the far town. R1-91: the simplified real DeliverGoods (m1_economy.cpp) computes the
-    // fare via the real GetTransportedGoodsIncome + credits COMPANY_FIRST (EXPENSES_ROADVEH_REVENUE,
-    // negative). dist = route length in tiles.
-    uint dist = (uint)b.len;
-    r1_deliver_cargo(b.pax, dist);
-    b.pax = 0;
 }
 
 // Advance the bus; returns true only on a tick where it actually moved a sub-pixel,
@@ -752,10 +759,10 @@ static bool r1_bus_move(R1Bus &b, int mult)
             // stops: neither end is ever used as a pathfinder START (which a single-axis bay stop would
             // break). It arrives (pickup/deliver) at each end. The route itself IS autonomous — the BFS
             // chose the roads between the two real stations at setup.
-            if (b.i >= b.len - 1) { b.i = b.len - 1; b.dir = -1; r1_bus_arrive(b); }
-            else if (b.i <= 0)    { b.i = 0;         b.dir = 1; r1_bus_arrive(b); }
-            // R1-101: landed on a drive-through stop tile -> pause to load/unload (~1.5s at 16fps).
-            if (IsTileType(b.route[b.i], MP_STATION)) b.dwell = 24;
+            if (b.i >= b.len - 1) { b.i = b.len - 1; b.dir = -1; }   // turnaround (economy is at stops now)
+            else if (b.i <= 0)    { b.i = 0;         b.dir = 1; }
+            // R1-101: landed on a drive-through stop tile -> real load/unload + proportional dwell.
+            if (IsTileType(b.route[b.i], MP_STATION)) r1_bus_service(b);
         }
     }
     return true;
@@ -987,14 +994,24 @@ extern "C" void r1_tick(void)
     // climbing (houses/pop) and the calendar advancing (date_fract/year).
     static unsigned n = 0;
     ++n;
+    // R1-101: TOWN SUPPLY — every ~128-tick beat each town feeds passengers into its station's REAL
+    // waiting queue (bounded inside r1_station_add_cargo), so the bus has genuine cargo to load and
+    // the station-list cargo bars fill. ~pop/32 per beat. Runs unthrottled by the log gate below.
+    if ((n & 0x7F) == 0) {
+        for (const Town *tt : Town::Iterate()) {
+            unsigned sup = (unsigned)(tt->cache.population >> 5);
+            if (sup > 0) r1_station_add_cargo((unsigned)tt->index, sup);
+        }
+    }
     if (n == 1 || (n & 0x7F) == 0) {
         const Town *t0 = Town::GetIfValid(0);
-        ottd_log("R1: live tick=%u date=%d mon=%d houses=%u pop=%u ind=%u cargo=%lu stations=%u orders=%u | bus0 i=%d dir=%d len=%d",
+        ottd_log("R1: live wait0=%u tick=%u date=%d mon=%d houses=%u pop=%u ind=%u cargo=%lu stations=%u orders=%u | bus0 i=%d dir=%d len=%d dwell=%d",
+                 r1_station_waiting(0),
                  n, (int)_date, (int)_cur_month,
                  t0 ? (uint)t0->cache.num_houses : 0u,
                  t0 ? (uint)t0->cache.population : 0u,
                  r1_industry_count(), r1_industry_stockpile(), r1_station_count(), r1_order_count(),
-                 g_bus[0].i, g_bus[0].dir, g_bus[0].len);
+                 g_bus[0].i, g_bus[0].dir, g_bus[0].len, g_bus[0].dwell);
         // R1-88 money reconciliation: the ONLY writer (SubtractMoneyFromAnyCompany) does
         // money -= cost AND yearly_expenses[0][type] += cost in lockstep, so money MUST equal
         // 100000 - Σ yearly_expenses[0][*]. If money != expect below, a hidden writer exists;

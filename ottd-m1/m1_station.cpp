@@ -49,6 +49,9 @@ template <> CargoList<StationCargoList, StationCargoPacketMap>::~CargoList();
  * specialized: nothing in this TU removes station cargo, so it is never instantiated. */
 template <> void CargoList<StationCargoList, StationCargoPacketMap>::AddToCache(const CargoPacket *cp);
 template <> bool CargoList<StationCargoList, StationCargoPacketMap>::TryMerge(CargoPacket *icp, CargoPacket *cp);
+/* R1-101: the bus now REMOVES cargo (loads it), so RemoveFromCache IS instantiated — declare before
+ * station_base.h so our definition wins (real home cargopacket.cpp uncompiled). */
+template <> void CargoList<StationCargoList, StationCargoPacketMap>::RemoveFromCache(const CargoPacket *cp, uint count);
 
 #include "station_base.h"
 #include "roadstop_base.h"
@@ -111,6 +114,45 @@ void CargoPacket::Merge(CargoPacket *cp)
 	this->count += cp->count;
 	this->feeder_share += cp->feeder_share;
 	delete cp;
+}
+
+/* R1-101 cache update on removal (mirror of AddToCache, subtracting). */
+template <>
+void CargoList<StationCargoList, StationCargoPacketMap>::RemoveFromCache(const CargoPacket *cp, uint count)
+{
+	this->count                 -= count;
+	this->cargo_days_in_transit -= (uint)cp->DaysInTransit() * count;
+}
+
+/* R1-101 CargoPacket::Reduce (cargopacket.cpp:115, minus feeder_share which we never set). */
+void CargoPacket::Reduce(uint count)
+{
+	this->count -= count;
+}
+
+/* R1-101 SIMPLIFIED StationCargoList::Truncate (cargopacket.cpp:769): FIFO-remove up to max_move
+ * passengers from the waiting queue — delete whole packets, reduce the last partial one. Drops the
+ * real one's random per-source distribution (we have a single source). Returns the amount removed.
+ * This is how the bus LOADS from a station's real waiting cargo. */
+uint StationCargoList::Truncate(uint max_move, StationCargoAmountMap *)
+{
+	max_move = std::min(max_move, this->count);
+	uint moved = 0;
+	for (Iterator it = this->packets.begin(); it != this->packets.end() && moved < max_move; ) {
+		CargoPacket *cp = *it;
+		uint diff = max_move - moved;
+		if (cp->Count() > diff) {
+			this->RemoveFromCache(cp, diff);
+			cp->Reduce(diff);
+			moved += diff;
+			break;
+		}
+		moved += cp->Count();
+		this->RemoveFromCache(cp, cp->Count());
+		it = this->packets.erase(it);
+		delete cp;
+	}
+	return moved;
 }
 
 /* StationCargoList::Append (cargopacket.cpp:690-703) — the one path that grows the map. */
@@ -237,12 +279,33 @@ extern "C" void r1_station_add_cargo(unsigned townid, unsigned pax)
 
 	if (pax > CargoPacket::MAX_COUNT) pax = CargoPacket::MAX_COUNT;
 	GoodsEntry &ge = st->goods[CT_PASSENGERS];
+	/* R1-101: bound the waiting queue so town supply doesn't grow it without limit (the bus draws it
+	 * down via r1_station_take_cargo). ~250 = a few bus-loads of visible waiting passengers. */
+	if (ge.cargo.TotalCount() >= 250) return;
 	SourceID src = (st->town != nullptr) ? (SourceID)st->town->index : INVALID_SOURCE;
 	CargoPacket *cp = new CargoPacket((StationID)st->index, st->xy, (uint16)pax, ST_TOWN, src);
 	ge.cargo.Append(cp, INVALID_STATION);
 
 	unsigned r = (unsigned)ge.rating + 8;
 	ge.rating = (byte)(r > 255 ? 255 : r);
+}
+
+/* R1-101: the bus LOADS up to `want` passengers from a town's station — real CargoPacket removal via
+ * the simplified Truncate above. Returns how many it actually got (< want when the queue runs low),
+ * which the caller uses to size the boarding pause (proportional dwell) and the fare. */
+extern "C" unsigned r1_station_take_cargo(unsigned townid, unsigned want)
+{
+	if (townid >= R1_MAX_TOWN_STATIONS || want == 0) return 0;
+	Station *st = g_town_station[townid];
+	if (st == nullptr) return 0;
+	return (unsigned)st->goods[CT_PASSENGERS].cargo.Truncate((uint)want);
+}
+
+/* R1-101: passengers currently waiting at a town's station (for the HUD / diagnostics). */
+extern "C" unsigned r1_station_waiting(unsigned townid)
+{
+	if (townid >= R1_MAX_TOWN_STATIONS || g_town_station[townid] == nullptr) return 0;
+	return (unsigned)g_town_station[townid]->goods[CT_PASSENGERS].cargo.TotalCount();
 }
 
 /* Number of real Station objects in the pool (for the HUD readout). */
