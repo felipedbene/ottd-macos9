@@ -58,13 +58,15 @@ struct R1SeqLine { int8 dx, dy, dz; uint8 sx, sy, sz; SpriteID img; };
  * invisible) WITHOUT covering the road (all 3 bay parts boxed the tile and covered it). RECOLOURED —
  * these are PALETTE_MODIFIER_COLOUR sprites, so PAL_NONE renders index garbage (the invisible bug). */
 static const R1SeqLine _r1_stop_shelter[2][2] = {
-	{	/* AXIS_X (road SW<->NE, ground SPR_ROAD_X): thin walls on the NW (y=0) and SE (y=15) edges. */
-		{  2,  0, 0, 11,  1, 12, SPR_BUS_STOP_NE_BUILD_A },
-		{  3, 15, 0, 11,  1, 12, SPR_BUS_STOP_SW_BUILD_A },
+	{	/* AXIS_X (road SW<->NE, ground SPR_ROAD_X): the SUBSTANTIAL BUILD_C walls on the N (y=0)
+		 * and S (y=13) edges, road band clear between (y=3..13). NOT the thin BUILD_A (invisible). */
+		{  3,  0, 0, 13,  3, 10, SPR_BUS_STOP_SW_BUILD_C },
+		{  0, 13, 0, 13,  3, 10, SPR_BUS_STOP_NE_BUILD_C },
 	},
-	{	/* AXIS_Y (road SE<->NW, ground SPR_ROAD_Y): thin walls on the NE (x=0) and SW (x=15) edges. */
-		{  0,  3, 0,  1, 11, 12, SPR_BUS_STOP_SE_BUILD_A },
-		{ 15,  2, 0,  1, 11, 12, SPR_BUS_STOP_NW_BUILD_A },
+	{	/* AXIS_Y (road SE<->NW, ground SPR_ROAD_Y): the BUILD_B walls on the W (x=0) and E (x=13)
+		 * edges, road band clear between (x=3..13). */
+		{  0,  0, 0,  3, 16, 10, SPR_BUS_STOP_SW_BUILD_B },
+		{ 13,  0, 0,  3, 16, 10, SPR_BUS_STOP_NE_BUILD_B },
 	},
 };
 
