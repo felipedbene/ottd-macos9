@@ -242,7 +242,7 @@ static int r1_noise(int x, int y, int scale);   // defined below (value noise)
 // (not in the bus section below) because r1_build_world seeds the fleet before that section.
 #define R1_NBUS 5
 struct R1Bus {
-    TileIndex route[64];
+    TileIndex route[96];   // R1-105: 96 (top-right river-detour route is 65 tiles)
     int  len, i, prog, dir;              // route path, current node, 0..15 sub-tile, +1/-1 ping-pong
     uint pax;                            // passengers aboard (fare state)
     unsigned long last_ticks, accum;     // time-based motion accumulator
@@ -255,10 +255,15 @@ struct R1Bus {
     int  dwell;                          // R1-101: frames left paused at a stop (loading/unloading)
 };
 static R1Bus g_bus[R1_NBUS];             // zero-init: len=0 (no route) until traced
+// R1-105 interactive: user-bought buses (the auto fleet g_bus[] is full at startup). Driven by r1_tick.
+#define R1_UBUS 8
+static R1Bus g_ubus[R1_UBUS];
+static int   g_nubus = 0;
 static void r1_trace_route(R1Bus &b, int cx, int cy);  // defined below (bus route)
 static Town *r1_town_near(TileIndex t);                // defined below (nearest town to a tile)
 static TileIndex r1_road_tile_near(int cx, int cy, int rad);          // R1-92: nearest MP_ROAD tile
 static int r1_build_road_path(int x0, int y0, int x1, int y1);        // R1-92: lay an inter-town road
+static int r1_build_road_multi(const int *xs, const int *ys, int n);         // R1-105: multi-segment road
 static int r1_find_straight_stop(const R1Bus &b, bool corner_end, int *axis);  // R1-95: straight stop tile
 static void r1_lay_rail_line(int x0, int x1, int y);                  // R1-104: lay rail + spawn train
 static void r1_make_viewport(int scroll_x, int scroll_y, Viewport *vp);  // defined below (draw)
@@ -440,13 +445,28 @@ extern "C" void r1_build_world(void)
         tid[i]  = (t != nullptr) ? (TownID)t->index : (TownID)0;
         rt[i]   = r1_road_tile_near((int)R1_TOWNS[i].x, (int)R1_TOWNS[i].y, 8);
     }
-    // Lay the spokes: each corner town's road tile -> the centre town's road tile (still OWNER_DEITY,
-    // as the town roads were). Where a spoke meets a town's own roads they auto-connect.
+    // Lay the spokes: the LEFT corners (i=1,3) get a straight L-spoke to the centre. The RIGHT
+    // corners (i=2,4) are cut off by the vertical river, so R1-105 routes them AROUND it — top-right
+    // north of the lake (y=3), bottom-right south of the river (y=59) — via multi-segment paths whose
+    // waypoints were verified water-free against r1_river_x/r1_in_lake.
     int road_laid = 0;
-    for (uint i = 1; i < lengthof(R1_TOWNS); i++)
-        if (rt[0] != INVALID_TILE && rt[i] != INVALID_TILE)
-            road_laid += r1_build_road_path((int)TileX(rt[i]), (int)TileY(rt[i]),
-                                            (int)TileX(rt[0]), (int)TileY(rt[0]));
+    if (rt[0] != INVALID_TILE) {
+        for (uint i = 1; i < lengthof(R1_TOWNS); i++) {
+            if (rt[i] == INVALID_TILE) continue;
+            if (i == 2) {   // top-right corner: cross north of the lake
+                int xs[] = { (int)TileX(rt[2]), 48, 29, 29, (int)TileX(rt[0]) };
+                int ys[] = { (int)TileY(rt[2]),  3,  3, 32, (int)TileY(rt[0]) };
+                road_laid += r1_build_road_multi(xs, ys, 5);
+            } else if (i == 4) {   // bottom-right corner: cross south of the river
+                int xs[] = { (int)TileX(rt[4]), 48, 29, 29, (int)TileX(rt[0]) };
+                int ys[] = { (int)TileY(rt[4]), 59, 59, 32, (int)TileY(rt[0]) };
+                road_laid += r1_build_road_multi(xs, ys, 5);
+            } else {   // left corners: straight L-spoke
+                road_laid += r1_build_road_path((int)TileX(rt[i]), (int)TileY(rt[i]),
+                                                (int)TileX(rt[0]), (int)TileY(rt[0]));
+            }
+        }
+    }
     ottd_log("R1-92: inter-town roads laid=%d tiles", road_laid);
 
     // One REAL pooled Station per town, anchored on its ROAD tile rt[i] (so Station::xy is reachable).
@@ -460,11 +480,11 @@ extern "C" void r1_build_world(void)
     // R1-93: which corners are actually road-reachable from the centre? (the pathfinder is ground
     // truth). Assign ALL buses ROUND-ROBIN over ONLY the connected corners, so none is stranded in
     // a tiny single-town loop (R1-92 left buses to water-blocked corners doing a lost len=3 ping-pong).
-    unsigned probe[64];
+    unsigned probe[96];
     int conn[4], ncon = 0;
     for (uint c = 1; c < lengthof(R1_TOWNS); c++)
         if (rt[0] != INVALID_TILE && rt[c] != INVALID_TILE &&
-            r1_road_path((unsigned)rt[0], (unsigned)rt[c], probe, 64) >= 2)
+            r1_road_path((unsigned)rt[0], (unsigned)rt[c], probe, 96) >= 2)
             conn[ncon++] = (int)c;
     ottd_log("R1-93: %d/%d corners road-connected to centre", ncon, (int)lengthof(R1_TOWNS) - 1);
 
@@ -476,7 +496,7 @@ extern "C" void r1_build_world(void)
         b.sa = b.sb = 0xFFFF; b.orders_done = false; b.order_leg = 1;
         if (ncon == 0) { r1_trace_route(b, (int)R1_TOWNS[i].x, (int)R1_TOWNS[i].y); continue; }
         int A = 0, B = conn[i % ncon];   // centre -> a CONNECTED corner (round-robin)
-        int n = r1_road_path((unsigned)rt[A], (unsigned)rt[B], (unsigned *)b.route, 64);
+        int n = r1_road_path((unsigned)rt[A], (unsigned)rt[B], (unsigned *)b.route, 96);
         if (n < 2) { r1_trace_route(b, (int)R1_TOWNS[i].x, (int)R1_TOWNS[i].y); continue; }
         b.len = n;
         b.sa = r1_town_station_index((unsigned)tid[A]);   // centre station (route[0])
@@ -664,6 +684,15 @@ static int r1_build_road_path(int x0, int y0, int x1, int y1)
     return laid;
 }
 
+// R1-105: chain r1_build_road_path across a list of waypoints (multi-segment road that routes AROUND
+// the river/lake to reach the right-side corners). Returns total segments laid.
+static int r1_build_road_multi(const int *xs, const int *ys, int n)
+{
+    int laid = 0;
+    for (int i = 0; i + 1 < n; i++) laid += r1_build_road_path(xs[i], ys[i], xs[i + 1], ys[i + 1]);
+    return laid;
+}
+
 // R1-95: find a STRAIGHT through-tile on the route near one end, so a DRIVE-THROUGH bus stop sits on
 // a straight road segment (not an intersection, which forced a blocking bay). Sets *axis to the road
 // axis (0 = AXIS_X, road runs along map-X / changing TileX; 1 = AXIS_Y, along map-Y / changing TileY),
@@ -722,6 +751,44 @@ static void r1_bus_service(R1Bus &b)
         b.dwell = (int)b.pax + 6;
         b.pax = 0;
     }
+}
+
+// ===== R1-105: INTERACTIVE tools (R1MainWindow::OnClick dispatches by clicked-tile TYPE) =====
+static void r1_build_road_at(TileIndex wt);   // defined far below; OnClick's grass tool
+
+// Drop a VISIBLE drive-through bus stop on a STRAIGHT road tile the user clicked, pointed at the
+// NEAREST town's real Station (so r1_bus_service loads/pays it for free). Axis from the road bits.
+static void r1_user_place_stop(TileIndex t)
+{
+    if (t >= MapSize() || !IsTileType(t, MP_ROAD)) return;
+    RoadBits rb = GetAnyRoadBits(t, RTT_ROAD, false);
+    int axis;
+    if      (rb == ROAD_X) axis = 0;   // straight SW<->NE
+    else if (rb == ROAD_Y) axis = 1;   // straight NW<->SE
+    else { ottd_log("R1: stop: (%u,%u) not straight (bits=%u)", (uint)TileX(t), (uint)TileY(t), (uint)rb); return; }
+    Town *tn = r1_town_near(t);
+    unsigned sid = (tn != nullptr) ? r1_town_station_index((unsigned)tn->index) : 0xFFFF;
+    if (sid == 0xFFFF) { ottd_log("R1: stop: no station for nearest town"); return; }
+    r1_place_bus_stop((unsigned)t, sid, axis);
+    MarkTileDirtyByTile(t);
+    ottd_log("R1: stop placed (%u,%u) axis=%d sid=%u", (uint)TileX(t), (uint)TileY(t), axis, sid);
+}
+
+// Spawn a user bus that runs a route starting at the clicked tile (r1_trace_route walks the roads;
+// the tick loop drives it and r1_update_vehicle gives it a pooled RoadVehicle).
+static void r1_user_buy_bus(TileIndex t)
+{
+    if (t >= MapSize()) return;
+    if (g_nubus >= R1_UBUS) { ottd_log("R1: bus: user fleet full"); return; }
+    R1Bus &b = g_ubus[g_nubus];
+    std::memset((void *)&b, 0, sizeof b);
+    r1_trace_route(b, (int)TileX(t), (int)TileY(t));
+    if (b.len < 2) { ottd_log("R1: bus: no drivable road at (%u,%u)", (uint)TileX(t), (uint)TileY(t)); return; }
+    b.dir = 1; b.i = 0;
+    Town *tn = r1_town_near(t);
+    b.sa = b.sb = (tn != nullptr) ? r1_town_station_index((unsigned)tn->index) : 0xFFFF;
+    g_nubus++;
+    ottd_log("R1: bus bought #%d len=%d at (%u,%u) sid=%u", g_nubus, b.len, (uint)TileX(t), (uint)TileY(t), b.sa);
 }
 
 // Advance the bus; returns true only on a tick where it actually moved a sub-pixel,
@@ -1051,6 +1118,8 @@ extern "C" void r1_tick(void)
     // only its own small screen rect, so N buses cost N tiny targeted marks (no full recomposite).
     for (uint bi = 0; bi < R1_NBUS; bi++)
         if (r1_bus_move(g_bus[bi], g_r1_fast ? 3 : 1)) { r1_update_vehicle(g_bus[bi]); r1_bus_mark_dirty(g_bus[bi]); }
+    for (int ub = 0; ub < g_nubus; ub++)   // R1-105: user-bought buses
+        if (r1_bus_move(g_ubus[ub], g_r1_fast ? 3 : 1)) { r1_update_vehicle(g_ubus[ub]); r1_bus_mark_dirty(g_ubus[ub]); }
     r1_train_move(g_r1_fast ? 3 : 1);   // R1-104: the train ping-pongs its rail line
 
     // Throttled liveness log: prove on the sink that the clock ticks + town grows.
@@ -1190,6 +1259,21 @@ struct R1MainWindow : Window {
         // is forced to FULL-redraw instead of GfxScroll's in-place _screen memmove (which tears on the
         // Mac's single QuickDraw buffer, vertical especially). That handles the map-edge clamp case my
         // earlier virtual_* sync could not, so this override just moves scrollpos.
+    }
+
+    // R1-105 INTERACTIVE: a plain LEFT-click applies a tile-type-keyed tool (Ctrl+drag still pans —
+    // the driver routes Ctrl-click to the right button -> OnScroll, never here). The clicked tile's
+    // TYPE picks the action, so the gestures never collide and each composes with the previous:
+    //   grass -> build a road · straight road -> drop a bus stop · a stop -> buy a bus that routes there.
+    void OnClick(Point pt, int widget, int click_count) override
+    {
+        if (widget != 0) return;                     // only the viewport widget
+        Point tp = GetTileBelowCursor();             // real height-aware inverse projection from _cursor.pos
+        if (tp.x < 0) return;                        // off-map
+        TileIndex t = TileVirtXY((uint)tp.x, (uint)tp.y);
+        if      (IsTileType(t, MP_STATION)) r1_user_buy_bus(t);
+        else if (IsTileType(t, MP_ROAD))    r1_user_place_stop(t);
+        else if (IsTileType(t, MP_CLEAR))   r1_build_road_at(t);
     }
 };
 
