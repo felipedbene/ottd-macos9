@@ -72,6 +72,9 @@ extern "C" long r1_deliver_cargo(unsigned pax, unsigned dist);
 // R1-101 faithful loading: the bus takes real CargoPackets FROM a station; waiting-queue size.
 extern "C" unsigned r1_station_take_cargo(unsigned townid, unsigned want);
 extern "C" unsigned r1_station_waiting(unsigned townid);
+// R1-104 TRAINS: real MP_RAILWAY track (m1_rail_draw.cpp) + a real Train in the pool (m1_train.cpp).
+extern "C" void r1_place_rail(unsigned tile, int axis);
+extern "C" void *r1_make_train(uint tile, int x, int y, int z, int dir);
 #include "command_func.h"
 #include "road_type.h"
 #include "road_map.h"
@@ -257,6 +260,7 @@ static Town *r1_town_near(TileIndex t);                // defined below (nearest
 static TileIndex r1_road_tile_near(int cx, int cy, int rad);          // R1-92: nearest MP_ROAD tile
 static int r1_build_road_path(int x0, int y0, int x1, int y1);        // R1-92: lay an inter-town road
 static int r1_find_straight_stop(const R1Bus &b, bool corner_end, int *axis);  // R1-95: straight stop tile
+static void r1_lay_rail_line(int x0, int x1, int y);                  // R1-104: lay rail + spawn train
 static void r1_make_viewport(int scroll_x, int scroll_y, Viewport *vp);  // defined below (draw)
 // Tap-to-zoom cycles this; the draw + pick + bus read it. NORMAL=0..OUT_8X=3.
 static ZoomLevel g_zoom = ZOOM_LVL_OUT_4X;
@@ -504,6 +508,10 @@ extern "C" void r1_build_world(void)
         }
     }
     ottd_log("R1-95: %d drive-through bus stops placed", stops_placed);
+
+    // R1-104: lay a straight rail line on the clear grass above the towns (y=6) and spawn a train
+    // that ping-pongs along it. Real MP_RAILWAY tiles (m1_rail_draw.cpp) + a real pooled Train.
+    r1_lay_rail_line(20, 44, 6);
 
     // Place the industries on their flat pads (bare grass only). index=0 is a dummy —
     // our minimal proc draws from gfx alone and never touches the Industry pool.
@@ -808,6 +816,61 @@ static void r1_update_vehicle(R1Bus &b)
     v->sprite_cache.sprite_seq.Set((SpriteID)(0xCD4 + dir));
 }
 
+// ===== R1-104: a real TRAIN on real MP_RAILWAY track =====
+// A straight rail line laid on clear grass; one real pooled Train ping-pongs along it (hand-driven,
+// like the bus). ViewportAddVehicles below draws it for free (it iterates the whole vehicle pool).
+struct R1Train { TileIndex route[48]; int len, i, prog, dir; unsigned long last_ticks, accum; Vehicle *v; };
+static R1Train g_train;
+
+// Lay a straight horizontal rail line (x0..x1 at row y) on CLEAR tiles; remember the tiles.
+static void r1_lay_rail_line(int x0, int x1, int y)
+{
+    g_train.len = 0; g_train.i = 0; g_train.dir = 1; g_train.prog = 0; g_train.v = nullptr;
+    for (int x = x0; x <= x1 && g_train.len < 48; x++) {
+        if (x < 1 || x >= (int)MapMaxX() || y < 1 || y >= (int)MapMaxY()) continue;
+        TileIndex t = TileXY((uint)x, (uint)y);
+        if (!IsTileType(t, MP_CLEAR)) { if (g_train.len > 0) break; else continue; }  // contiguous run
+        r1_place_rail((unsigned)t, 0);                 // axis 0 = straight X track
+        g_train.route[g_train.len++] = t;
+    }
+    ottd_log("R1-104: rail line len=%d at y=%d", g_train.len, y);
+}
+
+// Advance + ping-pong the train along its rail line, updating its pooled Vehicle position + sprite.
+static void r1_train_move(int mult)
+{
+    R1Train &t = g_train;
+    if (t.len < 2) return;
+    unsigned long now = macsys_ticks();
+    if (t.last_ticks == 0) t.last_ticks = now;
+    t.accum += (now - t.last_ticks) * (unsigned long)(mult > 0 ? mult : 1);
+    t.last_ticks = now;
+    if (t.accum > 8) t.accum = 8;
+    if (t.accum < 2) return;
+    t.accum -= 2;
+    if (++t.prog >= 16) {
+        t.prog = 0;
+        t.i += t.dir;
+        if (t.i >= t.len - 1) { t.i = t.len - 1; t.dir = -1; }
+        else if (t.i <= 0)    { t.i = 0;         t.dir = 1; }
+    }
+    int ni = t.i + t.dir;
+    if (ni < 0 || ni >= t.len) ni = t.i;
+    TileIndex a = t.route[t.i], b = t.route[ni];
+    int ax = (int)TileX(a), ay = (int)TileY(a);
+    int dx = (int)TileX(b) - ax, dy = (int)TileY(b) - ay;
+    int wx = ax * TILE_SIZE + TILE_SIZE / 2 + dx * t.prog;
+    int wy = ay * TILE_SIZE + TILE_SIZE / 2 + dy * t.prog;
+    int wz = (int)TileHeight(a) * TILE_HEIGHT;
+    Direction dir = (dx > 0) ? DIR_SW : (dx < 0) ? DIR_NE : (dy > 0) ? DIR_SE : DIR_NW;
+    if (t.v == nullptr) { t.v = (Vehicle *)r1_make_train((uint)a, wx, wy, wz, (int)dir); return; }
+    t.v->x_pos = wx; t.v->y_pos = wy; t.v->z_pos = wz; t.v->direction = dir;
+    t.v->sprite_cache.sprite_seq.Set((SpriteID)(0x0B59 + dir));
+    // Dirty the train's projected area (+ generous box) so it repaints each move.
+    Point p = RemapCoords(wx, wy, wz);
+    MarkAllViewportsDirty(p.x - 32, p.y - 64, p.x + 32, p.y + 32);
+}
+
 // R1-76: draw the REAL pooled vehicles. Called inside the real ViewportDoDraw, so each
 // vehicle's sprite is sorted correctly over the terrain/road by AddSortableSpriteToDraw.
 void ViewportAddVehicles(DrawPixelInfo *)
@@ -988,6 +1051,7 @@ extern "C" void r1_tick(void)
     // only its own small screen rect, so N buses cost N tiny targeted marks (no full recomposite).
     for (uint bi = 0; bi < R1_NBUS; bi++)
         if (r1_bus_move(g_bus[bi], g_r1_fast ? 3 : 1)) { r1_update_vehicle(g_bus[bi]); r1_bus_mark_dirty(g_bus[bi]); }
+    r1_train_move(g_r1_fast ? 3 : 1);   // R1-104: the train ping-pongs its rail line
 
     // Throttled liveness log: prove on the sink that the clock ticks + town grows.
     // First call confirms the hook fires; then every ~128 ticks show the town
