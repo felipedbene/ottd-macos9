@@ -156,7 +156,7 @@ void LinkGraphSchedule::ShiftDates(int) {}
  * ================================================================= */
 
 /* ---- void () ---- */
-void ShowSmallMap() {}
+/* ShowSmallMap now REAL — the extracted SmallMapWindow in m1_smallmap_gui.cpp. */
 void IConsoleSwitch() {}
 void ShowClientList() {}
 void ShowAboutWindow() {}
@@ -166,7 +166,7 @@ void ShowGameOptions() {}
 void ShowMusicWindow() {}
 void ShowGameSettings() {}
 void AskExitToGameMenu() {}
-void ShowSubsidiesList() {}
+/* ShowSubsidiesList now REAL — the extracted SubsidyListWindow in m1_subsidy_gui.cpp. */
 /* ShowTownDirectory is now REAL — the extracted TownDirectoryWindow in m1_town_directory_gui.cpp (R1-82). */
 void ShowAIConfigWindow() {}
 void ShowGSConfigWindow() {}

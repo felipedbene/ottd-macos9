@@ -1199,11 +1199,14 @@ static void r1_zoom_main(bool in)
 // R1-59: a REAL dropdown menu off the toolbar's map button — proves the dropdown widget
 // (widgets/dropdown.cpp) renders a clickable list of real StringID text via the language
 // pack. Terminated by INVALID_STRING_ID. Selecting "Town directory" opens the info window.
+void ShowSmallMap();        // R1-103: real minimap (m1_smallmap_gui.cpp)
+void ShowSubsidiesList();   // R1-103: real subsidies list (m1_subsidy_gui.cpp)
 static const StringID _r1_map_menu[] = {
-    STR_MAP_MENU_MAP_OF_WORLD,     // 0: "Map of world"
+    STR_MAP_MENU_MAP_OF_WORLD,     // 0: "Map of world" -> ShowSmallMap (real minimap)
     STR_MAP_MENU_EXTRA_VIEWPORT,   // 1: "Extra viewport"
     STR_MAP_MENU_SIGN_LIST,        // 2: "Sign list"
-    STR_TOWN_MENU_TOWN_DIRECTORY,  // 3: "Town directory"
+    STR_TOWN_MENU_TOWN_DIRECTORY,  // 3: "Town directory" -> info HUD
+    STR_SUBSIDIES_CAPTION,         // 4: "Subsidies" -> ShowSubsidiesList
     INVALID_STRING_ID,
 };
 
@@ -1264,7 +1267,10 @@ struct R1ToolbarWindow : Window {
     void OnDropdownSelect(int widget, int index) override
     {
         ottd_log("R1: dropdown widget=%d index=%d", widget, index);
-        if (widget == R1TB_SMALLMAP && index == 3) r1_toggle_info_window();
+        if (widget != R1TB_SMALLMAP) return;
+        if      (index == 0) ShowSmallMap();          // R1-103: real minimap window
+        else if (index == 3) r1_toggle_info_window();
+        else if (index == 4) ShowSubsidiesList();     // R1-103: real subsidies list
     }
 };
 
