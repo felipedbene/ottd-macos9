@@ -4,19 +4,26 @@ Bun-blog-style loop (https://bun.com/blog/bun-in-rust): every gate is mechanical
 agent can iterate on the Mac OS 9 port without a human booting VMs or eyeballing screens.
 
 ```
-harness/loop.sh            # ONE iteration: deploy → VM reset → sink assertions → screendump
+harness/loop.sh            # ONE iteration: halt → deploy → start → sink assertions → screendump
 ```
 
-One iteration ≈ 5 min unattended: incremental build (8s for a 1-file change, 82s full),
-deploy 1.7s, OS 9 reboot + auto-launch ~4 min (TCG), then 3 heartbeats of telemetry judged
-by 12 assertions. Artifacts land in `harness/artifacts/<TAG>/` (sink slice, verdict, PNG).
+One iteration ≈ 6–9 min unattended: **halt** the VM (frees the AFP lock on the running app),
+incremental build (8s for a 1-file change, 82s full) + deploy 1.7s, **start** (OS 9 cold boot +
+auto-launch ~4–5 min under TCG), then 3 heartbeats of telemetry judged by 12 assertions.
+Artifacts land in `harness/artifacts/<TAG>/` (sink slice, verdict, PNG).
+
+The loop is **halt → deploy → start**, NOT deploy-then-reset: a *running* guest holds
+`openttd - latest` open over AFP, so deploy's mv-over-the-app fails "Resource busy" until the
+guest is gone. `loop.sh` unmounts this Mac's AFP session cleanly first (so `release_share_lock`
+can't sweep it up and drop `/Volumes/vintage`), halts the VM, then remounts the share at the
+exact path before deploying.
 
 ## Pieces
 
 | Script | Does | Verify story |
 |---|---|---|
 | `deploy.sh [--no-bump]` | bumps `B2_BUILD_TAG` (R1-NNN+1) in `ottd-r1/r1main.c`, runs the mtime-gated `build.sh compile` + cmake `ottdr1_APPL`, archives `ottdr1-<TAG>.bin` on the share and installs `ottdr1-latest` (real app: data+rsrc forks + APPL FinderInfo survive plain `cp` to the FreeNAS AFP share) | prints ✓ per fork/size check |
-| `vm.sh install\|start\|stop\|reset\|status\|screendump <png>` | drives QEMU on CT 100 (`root@10.0.2.8`, key `~/.ssh/id_openclaw`) over QMP tcp:127.0.0.1:4444; QEMU runs as user `felipe` in tmux session `os9` via `/home/felipe/run-os9.sh` (in-repo copy: `remote/run-os9.sh`) | `status` → `{"running": true}`; screendump → PPM → sips → PNG |
+| `vm.sh install\|start\|stop\|halt\|reset\|status\|screendump <png>` | drives QEMU on CT 100 (`root@10.0.2.8`, key `~/.ssh/id_openclaw`) over QMP tcp:127.0.0.1:4444; QEMU runs as user `felipe` in tmux session `os9` via `/home/felipe/run-os9.sh` (in-repo copy: `remote/run-os9.sh`). `halt` = stop + wait for qemu to die + `release_share_lock` (VM left OFF, the pre-deploy step); `reset` = halt + start | `status` → `{"running": true}`; screendump → PPM → sips → PNG |
 | `assert.py --tag R1-NNN [--follow] [--from-file f]` | slices the UDP log sink by the boot banner for THIS tag; 12 assertions: banner, sink UP, world facts vs `expected.json`, engine live, ≥N heartbeats with strictly-increasing tick, liveness variance (frozen-sim detector), `money==expect` on every FIN line + net trend, zero fault lines | exit 0/1/2; validated 12/12 on real R1-105 data; fault + frozen fixtures FAIL correctly |
 | `expected.json` | known-good world facts (corners `"3/4"` until the river-router bug is fixed) | edit when a feature legitimately changes the world |
 
@@ -46,6 +53,17 @@ Sink access: `kubectl -n gopher-spot logs deploy/log-sink` (assert.py falls back
   converts QEMU's PPM natively.
 - A stale previously-launched app produces confusingly identical traces — that's why deploy.sh
   ALWAYS bumps the tag and assert.py keys on the banner: stale runs are rejected by construction.
+- **AFP lock + mount churn**: `release_share_lock` kills the FreeNAS afpd session holding an fd on
+  the app's `.AppleDouble`. Because this Mac *writes* the app during deploy, its OWN afpd session
+  can hold that fd and get killed too — dropping `/Volumes/vintage`, and the unclean drop makes the
+  remount auto-rename to `/Volumes/vintage-1` (deploy needs the exact path). `loop.sh` fixes this by
+  unmounting cleanly *before* halt and clearing stray `vintage-N` mounts before remounting.
+- **`loop.sh` with no args**: forward `"$@"` (not `"${1:-}"`, which passes an empty-string arg that
+  `deploy.sh` rejects as unknown). `loop.sh --no-bump` re-runs the current tag.
+- **On-screen text must go through a real Window** (`DrawWidget`/`DrawString`): `r1_viewport_draw` is
+  dead code under `-DR1_MERGE` (its only caller is `#ifndef R1_MERGE`), so a viewport-drawn HUD never
+  blits. The 12 gates test *telemetry*, not pixels — a correct-but-invisible HUD passes green (exactly
+  the "screen ≠ telemetry" gap the Vision-OCR roadmap item closes). See the R1-117 cash bar.
 
 ## Roadmap (v2)
 1. **Vision-OCR cross-check**: macOS Vision (`VNRecognizeTextRequest`, pyobjc) OCRs the
