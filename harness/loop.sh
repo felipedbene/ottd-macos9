@@ -13,25 +13,42 @@ cd "$(dirname "$0")/.."
 H=harness
 
 SHARE=/Volumes/vintage
+AFP_HOST=10.0.1.148
 AFP_URL='afp://;AUTH=No User Authent@10.0.1.148/vintage'   # guest, password-less
 
-# ensure_share — (re)mount the deploy target if it's absent. vm.sh halt's
-# release_share_lock kills afpd sessions holding an fd on the app's .AppleDouble;
-# because THIS Mac writes the app during deploy, its own afpd session can hold
-# such an fd and get swept up, dropping /Volumes/vintage. Remount idempotently.
+share_mounted() { mount | grep -q " on $SHARE "; }
+
+# unmount_share — cleanly log this Mac out of the AFP share. Done BEFORE halt so
+# release_share_lock (which kills afpd sessions holding an fd on the app) can't
+# kill OUR session and drop the mount mid-deploy — and so no stray /Volumes/
+# vintage-N remount is left behind. Idempotent; unmounts every mount of the share.
+unmount_share() {
+    local mp
+    for mp in $(mount | awk -v h="$AFP_HOST/vintage" 'index($0,h){print $3}'); do
+        diskutil unmount "$mp" >/dev/null 2>&1 || umount "$mp" 2>/dev/null || true
+    done
+    [ -d "$SHARE" ] && rmdir "$SHARE" 2>/dev/null || true
+}
+
+# ensure_share — mount the deploy target at EXACTLY $SHARE. Clears any stray
+# vintage-N mounts + a leftover empty mountpoint first, else osascript auto-renames
+# the mount to /Volumes/vintage-1 (which broke deploy: it needs $SHARE by exact path).
 ensure_share() {
-    mount | grep -q " on $SHARE " && return 0
-    echo "== loop: $SHARE not mounted (halt/release-lock dropped it); remounting =="
+    share_mounted && return 0
+    echo "== loop: mounting $SHARE (clearing any stray vintage-N mounts first) =="
+    unmount_share
     osascript -e "mount volume \"$AFP_URL\"" >/dev/null 2>&1 || true
-    for _ in 1 2 3 4 5; do mount | grep -q " on $SHARE " && return 0; sleep 1; done
-    echo "== loop: WARN could not remount $SHARE — deploy will fail with a clear error" >&2
+    for _ in 1 2 3 4 5; do share_mounted && return 0; sleep 1; done
+    echo "== loop: WARN could not mount $SHARE — deploy will fail with a clear error" >&2
     return 1
 }
 
 # Halt the VM BEFORE deploy: a running guest holds `openttd - latest` open over
 # AFP, so deploy's mv-over-the-app fails "Resource busy" until the guest is gone
 # and its afpd lock is released. halt = stop + wait + release_share_lock (VM off).
-echo "== loop: halting VM to release the AFP lock on the deployed app =="
+# Unmount our AFP session FIRST so release_share_lock can't sweep it up (see above).
+echo "== loop: unmounting AFP share + halting VM to release the app lock =="
+unmount_share
 bash "$H/vm.sh" halt
 
 ensure_share
