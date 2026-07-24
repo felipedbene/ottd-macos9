@@ -104,6 +104,7 @@ extern "C" void *r1_make_train(uint tile, int x, int y, int z, int dir);
 #include "townname_func.h"        // GenerateTownNameString (R1-53 sign diagnostic)
 #include "language.h"             // ReadLanguagePack, LanguageMetadata (R1-57 string system)
 #include "string_func.h"          // strecpy
+#include "strings_func.h"         // SetDParam (R1-116 cash bar: real currency string)
 #include "widgets/dropdown_func.h" // ShowDropDownMenu (R1-59 real dropdown menu)
 #include "widgets/dropdown_type.h" // ShowDropDownList + DropDownListStringItem (auto-width, R1-60)
 #include "toolbar_gui.h"          // AllocateToolbar (R1-61 canonical toolbar)
@@ -1499,6 +1500,53 @@ struct R1InfoWindow : Window {
     }
 };
 
+// R1-116: a dedicated always-on company CASH readout — the way the game shows money.
+// A compact panel pinned to the bottom-left corner, rendering the balance with the REAL
+// currency string (STR_JUST_CURRENCY_LONG -> "£99,931") via the same SetDParam path the
+// finance + graph windows use (currency slot 0 is seeded "£" by r1_economy_startup).
+// Drawn through the REAL window system (DrawWidget/DrawString) — the ONLY on-screen-text
+// path that actually blits in R1: r1_viewport_draw is dead code under R1_MERGE, so any
+// HUD must be a real Window, exactly like the "Towns" panel's live Money line.
+enum R1CashWidgets { R1CW_PANEL = 0 };
+
+static const NWidgetPart _r1_cash_widgets[] = {
+    NWidget(WWT_PANEL, COLOUR_GREY, R1CW_PANEL), SetMinimalSize(132, 20), EndContainer(),
+};
+
+static WindowDesc _r1_cash_desc(
+    WDP_MANUAL, nullptr, 0, 0,
+    WC_NONE, WC_NONE, 0,
+    _r1_cash_widgets, lengthof(_r1_cash_widgets), nullptr);
+
+struct R1CashWindow : Window {
+    R1CashWindow(WindowDesc *desc) : Window(desc)
+    {
+        this->InitNested(0);
+        // pin to the bottom-left corner (WDP_MANUAL -> we own the placement).
+        this->left = 4;
+        this->top  = _screen.height - this->height - 4;
+        this->SetDirty();
+    }
+
+    void DrawWidget(const Rect &r, int widget) const override
+    {
+        if (widget != R1CW_PANEL) return;
+        const Company *co = Company::GetIfValid(COMPANY_FIRST);
+        SetDParam(0, co ? co->money : (Money)0);
+        DrawString(r.left + 6, r.right - 6, r.top + 5, STR_JUST_CURRENCY_LONG, TC_WHITE);
+    }
+
+    void OnPaint() override { this->DrawWidgets(); }
+
+    // Refresh a few times a second so the balance updates live as costs/revenue move it.
+    void OnRealtimeTick(uint delta_ms) override
+    {
+        static uint acc = 0;
+        acc += delta_ms;
+        if (acc >= 300) { acc = 0; this->SetWidgetDirty(R1CW_PANEL); }
+    }
+};
+
 // Open the Game Info window, or close it if already open (toolbar TOWN button toggle).
 static void r1_toggle_info_window()
 {
@@ -1584,6 +1632,10 @@ extern "C" void r1_start_window_system(void)
     // r1_toggle_info_window), so nothing else opens it.
     new R1InfoWindow(&_r1_info_desc);
     ottd_log("R1: info window up (year/towns/pop/money)");
+
+    // R1-116: dedicated always-on company cash bar (bottom-left), how the game shows money.
+    new R1CashWindow(&_r1_cash_desc);
+    ottd_log("R1: cash window up (live company balance)");
 }
 
 extern "C" int b2_scene_init(void)
