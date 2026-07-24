@@ -12,11 +12,29 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 H=harness
 
+SHARE=/Volumes/vintage
+AFP_URL='afp://;AUTH=No User Authent@10.0.1.148/vintage'   # guest, password-less
+
+# ensure_share — (re)mount the deploy target if it's absent. vm.sh halt's
+# release_share_lock kills afpd sessions holding an fd on the app's .AppleDouble;
+# because THIS Mac writes the app during deploy, its own afpd session can hold
+# such an fd and get swept up, dropping /Volumes/vintage. Remount idempotently.
+ensure_share() {
+    mount | grep -q " on $SHARE " && return 0
+    echo "== loop: $SHARE not mounted (halt/release-lock dropped it); remounting =="
+    osascript -e "mount volume \"$AFP_URL\"" >/dev/null 2>&1 || true
+    for _ in 1 2 3 4 5; do mount | grep -q " on $SHARE " && return 0; sleep 1; done
+    echo "== loop: WARN could not remount $SHARE — deploy will fail with a clear error" >&2
+    return 1
+}
+
 # Halt the VM BEFORE deploy: a running guest holds `openttd - latest` open over
 # AFP, so deploy's mv-over-the-app fails "Resource busy" until the guest is gone
 # and its afpd lock is released. halt = stop + wait + release_share_lock (VM off).
 echo "== loop: halting VM to release the AFP lock on the deployed app =="
 bash "$H/vm.sh" halt
+
+ensure_share
 
 bash "$H/deploy.sh" "$@"
 
