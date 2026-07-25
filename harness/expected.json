@@ -1,7 +1,7 @@
 {
-  "_note": "Known-good world facts for the R1 build. corners is '3/4' TODAY because of a known open bug in the corner road router (one corner fails to connect to centre); bump to '4/4' when the router bug is fixed. Values verified against the R1-105 run on the log sink (roads=188, stops=4, rail_len=9, towns=5).",
+  "_note": "Known-good world facts for the R1 build. corners is '4/4' as of R1-122: the top-right corner's river-detour used to cross town 1's east-west spoke at the SLOPED tile (29,16) where OpenTTD refuses a cross-slope road bit (pinpointed R1-118..121); R1-122 reroutes it (down x=29 to y=15, east to x=32, then south) to avoid that crossing. Values verified against the R1-105 run on the log sink (roads=188, stops=4, rail_len=9, towns=5).",
   "roads_laid_min": 1,
-  "corners": "3/4",
+  "corners": "4/4",
   "bus_stops_min": 4,
   "rail_len_min": 1,
   "towns_seeded": 5

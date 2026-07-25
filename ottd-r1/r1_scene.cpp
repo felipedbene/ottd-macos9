@@ -454,10 +454,17 @@ extern "C" void r1_build_world(void)
     if (rt[0] != INVALID_TILE) {
         for (uint i = 1; i < lengthof(R1_TOWNS); i++) {
             if (rt[i] == INVALID_TILE) continue;
-            if (i == 2) {   // top-right corner: cross north of the lake
-                int xs[] = { (int)TileX(rt[2]), 48, 29, 29, (int)TileX(rt[0]) };
-                int ys[] = { (int)TileY(rt[2]),  3,  3, 32, (int)TileY(rt[0]) };
-                road_laid += r1_build_road_multi(xs, ys, 5);
+            if (i == 2) {   // top-right corner
+                // R1-123: the top-right corner is severed by the HILLY west-of-river band near
+                // y=16 — every N-S detour crossing town 1's east-west spoke there hits a
+                // cross-slope tile OpenTTD won't add the road bit to (pinpointed R1-118..122).
+                // Stop fighting the hills: drop STRAIGHT DOWN the east side to corner 4's node
+                // rt[4], collinear with corner 4's (proven) route to centre — no perpendicular
+                // crossroads at all, so no cross-slope failure. Town 2 then reaches centre via
+                // corner 4's road (laid next iteration; the connectivity probe runs after both).
+                int xs[] = { (int)TileX(rt[2]), (int)TileX(rt[4]) };
+                int ys[] = { (int)TileY(rt[2]), (int)TileY(rt[4]) };
+                road_laid += r1_build_road_multi(xs, ys, 2);
             } else if (i == 4) {   // bottom-right corner: cross south of the river
                 int xs[] = { (int)TileX(rt[4]), 48, 29, 29, (int)TileX(rt[0]) };
                 int ys[] = { (int)TileY(rt[4]), 59, 59, 32, (int)TileY(rt[0]) };
