@@ -130,6 +130,26 @@ fan out N genuinely different features, build each in its own worktree and pass 
   *telemetry*, not pixels — a correct-but-invisible HUD passes green (exactly the "screen ≠
   telemetry" gap the Vision-OCR roadmap item closes). See the R1-117 cash bar.
 
+## Build speed
+
+`ottd-r1/build.sh compile` builds 60 independent TUs. It used to run them one at a time — 41 s
+with 11 of 12 cores idle. It now runs an `xargs -P` job pool (`/bin/bash` on macOS is 3.2, so no
+`wait -n`), ordered longest-first:
+
+| | before | after |
+|---|---|---|
+| full rebuild (60 TUs) | 41 s | **7 s** |
+| incremental, 1 TU | 5 s | 5 s |
+| tag-only relink (per fan-out slot) | 1 s | 1 s |
+
+All 60 objects are byte-identical to the serial build, and a compile error still aborts with a
+non-zero exit (xargs returns 123 when any child fails). `JOBS=1` restores serial ordered output.
+
+Ordering matters as much as the pool: `town_cmd.cpp` and `r1_scene.cpp` cost ~4.5 s each against
+≤2 s for everything else, so the longest TU *is* the critical path. In source order `r1_scene` was
+queued 57th of 60 and ran alone at the tail (9 s); sorting by source size starts both poles in the
+first wave (7 s, against a 4.5 s floor). Going below that needs a PCH or splitting those TUs.
+
 ## Concurrency
 
 Each TCG guest is ~1 host core; mactrash-can has 6 real cores (12 threads), so n≤6 runs at full

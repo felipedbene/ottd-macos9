@@ -51,72 +51,127 @@ SRC_TUS=(date.cpp core/pool_func.cpp town_cmd.cpp landscape.cpp clear_cmd.cpp ro
 # m1_text_stubs = the 4 symbols the real font/layout TUs need (config/utf8/glyphs).
 M1_TUS=(m1_shims m1_methods m1_pools m1_profiling_stub m1_town_stubs m1_cmd_stubs m1_land_stubs m1_road_stubs m1_viewport_stubs m1_text_stubs m1_world_stubs m1_water_draw m1_industry_draw m1_window_stubs m1_strings_stubs m1_toolbar_stubs m1_company m1_vehicle m1_economy m1_finance_gui m1_industry m1_town_directory_gui m1_station m1_company_gui m1_station_gui m1_vehicle_list_gui m1_graph_gui m1_station_draw m1_order m1_pathfind m1_town_gui m1_industry_gui m1_smallmap_gui m1_subsidy_gui m1_rail_draw m1_train)
 
+# --- parallel compile --------------------------------------------------------
+# The 60 TUs are independent single `g++ -c src -o obj` calls, and they used to run
+# one at a time: 41s of wall clock with 11 of 12 cores idle.
+#
+# /bin/bash on macOS is 3.2, which has no `wait -n`, so the job pool is xargs -P.
+# Each queued unit is one fully-quoted shell string (printf %q over the real argv,
+# so a path with a space can never re-split), run as `sh -c 'eval "$0"'`. xargs
+# exits 123 when ANY child fails; that is turned into a hard exit so a compile
+# error still aborts the build the way `set -e` did when this was serial.
+#
+# JOBS=1 restores serial, ordered output for debugging.
+JOBS="${JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)}"
+QFILE=$(mktemp /tmp/r1build.XXXXXX)
+trap 'rm -f "$QFILE"' EXIT
+
+quote_argv() { local q="" a; for a in "$@"; do q="$q $(printf '%q' "$a")"; done; printf '%s' "${q# }"; }
+fsize() { stat -f%z "$1" 2>/dev/null || stat -c%s "$1" 2>/dev/null || echo 0; }
+
+# queue_cc SRC LABEL compiler args... — the label prints when the unit STARTS, so
+# output interleaves but every line stays whole. Each record is "cost<TAB>command";
+# SRC's byte size is the cost, used to schedule longest-first (see run_queue).
+queue_cc() {
+  local src="$1" label="$2"; shift 2
+  printf '%s\t%s\n' "$(fsize "$src")" \
+    "printf '  %s\n' $(printf '%q' "$label"); $(quote_argv "$@")" >> "$QFILE"
+}
+
+# Longest-processing-time-first. Two TUs dominate the build -- town_cmd.cpp and
+# r1_scene.cpp at ~4.5s each, against <=2s for everything else -- so the critical
+# path IS the longest TU, and whether we hit it depends entirely on when that TU
+# starts. In source order r1_scene is queued 57th of 60, so with -j12 it began
+# only after ~48 others and then ran alone at the tail: 9s wall for 41s of work
+# that has a 4.5s floor. Sorting by source size (the top 3 by size include both
+# poles) starts them in the first wave instead.
+#
+# Records are newline-delimited so sort can order them, then converted to NUL for
+# xargs -0 -- printf %q renders any newline as $'\n', so no command can span lines.
+run_queue() {
+  local n
+  n=$(wc -l < "$QFILE" | tr -d ' ')
+  if [ "${n:-0}" -eq 0 ]; then echo "== nothing to compile (all up-to-date) =="; return 0; fi
+  echo "== compiling $n TU(s) with -j$JOBS (longest-first) =="
+  if ! sort -rn "$QFILE" | cut -f2- | tr '\n' '\0' | xargs -0 -P "$JOBS" -n1 /bin/sh -c 'eval "$0"'; then
+    echo "build.sh: FATAL a compile failed (see the CXX lines above)" >&2
+    exit 1
+  fi
+  : > "$QFILE"
+}
+
 compile_all() {
   mkdir -p "$R1/obj"
+  : > "$QFILE"
+
   echo "== engine src TUs =="
   for t in "${SRC_TUS[@]}"; do
     local out="$R1/obj/$(basename ${t%.cpp}).o"
     if up_to_date "$out" "$OTTD/src/$t"; then
       echo "  skip (up-to-date) $t"
     else
-      echo "  CXX $t"; $GXX "${CXXFLAGS[@]}" "${INCS[@]}" -c "$OTTD/src/$t" -o "$out"
+      queue_cc "$OTTD/src/$t" "CXX $t" "$GXX" "${CXXFLAGS[@]}" "${INCS[@]}" -c "$OTTD/src/$t" -o "$out"
     fi
   done
+
   echo "== M1 support TUs (from ottd-m1) =="
   for f in "${M1_TUS[@]}"; do
     if up_to_date "$R1/obj/$f.o" "$M1/$f.cpp"; then
       echo "  skip (up-to-date) $f"
     else
-      echo "  CXX $f"; $GXX "${CXXFLAGS[@]}" "${INCS[@]}" -c "$M1/$f.cpp" -o "$R1/obj/$f.o"
+      queue_cc "$M1/$f.cpp" "CXX $f" "$GXX" "${CXXFLAGS[@]}" "${INCS[@]}" -c "$M1/$f.cpp" -o "$R1/obj/$f.o"
     fi
   done
+
   if up_to_date "$R1/obj/m1_deadpools.o" "$M1/m1_deadpools.c"; then
     echo "  skip (up-to-date) m1_deadpools"
   else
-    echo "  CC  m1_deadpools"; $GCC -DR1_MERGE -DR1_STRINGS -c "$M1/m1_deadpools.c" -o "$R1/obj/m1_deadpools.o"
+    queue_cc "$M1/m1_deadpools.c" "CC  m1_deadpools" "$GCC" -DR1_MERGE -DR1_STRINGS -c "$M1/m1_deadpools.c" -o "$R1/obj/m1_deadpools.o"
   fi
+
+  # The three sed-patched TUs write distinct *_patched.cpp files, so the rewrite is
+  # done here (it costs milliseconds) and only the compile is queued.
   echo "== viewport.cpp (DoSetViewportPosition forced to full-redraw: no GfxScroll in-place _screen"
   echo "   memmove, which tears the Mac's single QuickDraw buffer on drag-to-pan, vertical especially) =="
   if up_to_date "$R1/obj/viewport.o" "$OTTD/src/viewport.cpp"; then
     echo "  skip (up-to-date) viewport"
   else
-    echo "  CXX viewport"
     # Force the 'fully_outside' full-redraw branch for EVERY scroll by making its guard always true.
     sed 's#if (abs(xo) >= width || abs(yo) >= height) {#if (true) { /* R1: always full-redraw, no GfxScroll tearing */#' \
         "$OTTD/src/viewport.cpp" > "$R1/obj/viewport_patched.cpp"
-    $GXX "${CXXFLAGS[@]}" "${INCS[@]}" -c "$R1/obj/viewport_patched.cpp" -o "$R1/obj/viewport.o"
+    queue_cc "$R1/obj/viewport_patched.cpp" "CXX viewport" "$GXX" "${CXXFLAGS[@]}" "${INCS[@]}" -c "$R1/obj/viewport_patched.cpp" -o "$R1/obj/viewport.o"
   fi
+
   echo "== window system (widget.cpp; window.cpp with the broken steady_clock sed'd to R1SteadyClock) =="
   if up_to_date "$R1/obj/widget.o" "$OTTD/src/widget.cpp"; then
     echo "  skip (up-to-date) widget"
   else
-    echo "  CXX widget"
-    $GXX "${CXXFLAGS[@]}" "${INCS[@]}" -c "$OTTD/src/widget.cpp" -o "$R1/obj/widget.o"
+    queue_cc "$OTTD/src/widget.cpp" "CXX widget" "$GXX" "${CXXFLAGS[@]}" "${INCS[@]}" -c "$OTTD/src/widget.cpp" -o "$R1/obj/widget.o"
   fi
   if up_to_date "$R1/obj/window.o" "$OTTD/src/window.cpp" "$R1/r1_winclock.h"; then
     echo "  skip (up-to-date) window"
   else
-    echo "  CXX window"
     sed 's/std::chrono::steady_clock/R1SteadyClock/g' "$OTTD/src/window.cpp" > "$R1/obj/window_patched.cpp"
-    $GXX "${CXXFLAGS[@]}" -include "$R1/r1_winclock.h" "${INCS[@]}" -c "$R1/obj/window_patched.cpp" -o "$R1/obj/window.o"
+    queue_cc "$R1/obj/window_patched.cpp" "CXX window" "$GXX" "${CXXFLAGS[@]}" -include "$R1/r1_winclock.h" "${INCS[@]}" -c "$R1/obj/window_patched.cpp" -o "$R1/obj/window.o"
   fi
+
   echo "== strings.cpp (real string system; ReadLanguagePack strrchr made null-safe for bare filenames) =="
   if up_to_date "$R1/obj/strings.o" "$OTTD/src/strings.cpp"; then
     echo "  skip (up-to-date) strings"
   else
-    echo "  CXX strings"
     sed -e 's|strrchr(_current_language->file, PATHSEPCHAR) + 1|(strrchr(_current_language->file, PATHSEPCHAR) ? strrchr(_current_language->file, PATHSEPCHAR) + 1 : _current_language->file)|' \
         -e 's|void CheckForMissingGlyphs(bool base_font, MissingGlyphSearcher \*searcher)|void CheckForMissingGlyphs_R1UNUSED(bool base_font, MissingGlyphSearcher *searcher)|' \
         "$OTTD/src/strings.cpp" > "$R1/obj/strings_patched.cpp"
-    $GXX "${CXXFLAGS[@]}" "${INCS[@]}" -c "$R1/obj/strings_patched.cpp" -o "$R1/obj/strings.o"
+    queue_cc "$R1/obj/strings_patched.cpp" "CXX strings" "$GXX" "${CXXFLAGS[@]}" "${INCS[@]}" -c "$R1/obj/strings_patched.cpp" -o "$R1/obj/strings.o"
   fi
+
   echo "== R1 scene (real-map render + engine world-build) =="
   if up_to_date "$R1/obj/r1_scene.o" "$R1/r1_scene.cpp"; then
     echo "  skip (up-to-date) r1_scene"
   else
-    echo "  CXX r1_scene"
-    $GXX "${CXXFLAGS[@]}" "${INCS[@]}" -c "$R1/r1_scene.cpp" -o "$R1/obj/r1_scene.o"
+    queue_cc "$R1/r1_scene.cpp" "CXX r1_scene" "$GXX" "${CXXFLAGS[@]}" "${INCS[@]}" -c "$R1/r1_scene.cpp" -o "$R1/obj/r1_scene.o"
   fi
+
   # R1-local b2_shims.o: same B2 source, but -DR1_MERGE (in CXXFLAGS) turns on the
   # live-engine hook (GameLoop->r1_tick) + per-frame redraw. Replaces ${B2}/b2_shims.o
   # in the R1 link (CMakeLists no longer lists that one — it comes from obj/*.o).
@@ -124,18 +179,19 @@ compile_all() {
   if up_to_date "$R1/obj/b2_shims.o" "$B2/b2_shims.cpp"; then
     echo "  skip (up-to-date) b2_shims"
   else
-    echo "  CXX b2_shims"
-    $GXX "${CXXFLAGS[@]}" "${INCS[@]}" -c "$B2/b2_shims.cpp" -o "$R1/obj/b2_shims.o"
+    queue_cc "$B2/b2_shims.cpp" "CXX b2_shims" "$GXX" "${CXXFLAGS[@]}" "${INCS[@]}" -c "$B2/b2_shims.cpp" -o "$R1/obj/b2_shims.o"
   fi
+
   # R1-local b1_shims: -DR1_MERGE drops its Layouter/GetCharacterHeight stubs so the
   # REAL gfx_layout.cpp/fontcache.cpp own them (text rendering). Replaces ${B1}/b1_shims.o.
   echo "== R1-local b1_shims (real-text dedup) =="
   if up_to_date "$R1/obj/b1_shims.o" "$B1/b1_shims.cpp"; then
     echo "  skip (up-to-date) b1_shims"
   else
-    echo "  CXX b1_shims"
-    $GXX "${CXXFLAGS[@]}" "${INCS[@]}" -c "$B1/b1_shims.cpp" -o "$R1/obj/b1_shims.o"
+    queue_cc "$B1/b1_shims.cpp" "CXX b1_shims" "$GXX" "${CXXFLAGS[@]}" "${INCS[@]}" -c "$B1/b1_shims.cpp" -o "$R1/obj/b1_shims.o"
   fi
+
+  run_queue
 }
 
 # netlog.o is not produced by any cmake target and is covered by .gitignore's *.o,
