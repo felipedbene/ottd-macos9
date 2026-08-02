@@ -26,6 +26,8 @@
 #include "ground_vehicle.hpp"
 #include "track_func.h"        /* Trackdir, INVALID_TRACKDIR */
 #include "company_func.h"      /* _local_company */
+#include "engine_base.h"        /* Engine, EngineOverrideManager */
+#include "engine_func.h"        /* SetupEngines, StartupEngines */
 #include "core/pool_func.hpp"
 
 #include "safeguards.h"
@@ -106,4 +108,38 @@ extern "C" void *r1_make_roadvehicle(uint tile, int x, int y, int z, int dir)
 	static UnitID s_next_unit = 1;    /* R1-86: distinct 1..N so the vehicle-list rows aren't all "0" */
 	v->unitnumber = s_next_unit++;
 	return v;
+}
+
+/* Stand up the game's REAL engine list.
+ *
+ * R1 ran with a completely EMPTY _engine_pool: nothing ever called SetupEngines,
+ * so Engine::Get() had nothing to return and every value the real vehicle code
+ * reads off an engine -- spritenum, capacity, power, weight, tractive effort --
+ * was simply absent. That is why GroundVehicle<RoadVehicle>::GetAcceleration has
+ * to fake a constant: with a zeroed cache the real formula honestly computes 0
+ * and the bus never moves.
+ *
+ * ResetToDefaultMapping + SetupEngines build the ~250 original vehicles straight
+ * out of the static spec tables in table/engines.h (the Engine ctor copies from
+ * _orig_road_vehicle_info and friends -- no NewGRF, no file I/O). StartupEngines
+ * then sets intro dates and availability so the engines are actually buyable.
+ *
+ * Returns how many road engines landed in the pool, so the sink can prove it. */
+extern "C" int r1_setup_engines(void)
+{
+	_engine_mngr.ResetToDefaultMapping();
+	SetupEngines();
+	StartupEngines();
+
+	int road = 0;
+	for (const Engine *e : Engine::Iterate()) if (e->type == VEH_ROAD) road++;
+	return road;
+}
+
+/* First road engine in the pool -- the bus R1 builds. Returns INVALID_ENGINE if
+ * r1_setup_engines has not run or the pool holds no road vehicle. */
+extern "C" int r1_first_road_engine(void)
+{
+	for (const Engine *e : Engine::Iterate()) if (e->type == VEH_ROAD) return (int)e->index;
+	return (int)INVALID_ENGINE;
 }

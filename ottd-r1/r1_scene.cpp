@@ -305,9 +305,19 @@ static unsigned char r1_hmap[R1_MAP * R1_MAP];
 // Build a real OpenTTD world: a rolling-hills landscape with several growing towns.
 // After this, GetTileType() over the map returns real MP_CLEAR/MP_ROAD/MP_HOUSE with
 // real per-tile heights, which the game's own viewport renders (slopes, foundations).
+extern "C" int  r1_setup_engines(void);
+extern "C" int  r1_first_road_engine(void);
+
 extern "C" void r1_build_world(void)
 {
     _game_mode = GM_NORMAL;
+    // Real engines BEFORE anything creates a vehicle: the pool used to be empty,
+    // so every engine-derived value (spritenum, capacity, power, weight) was absent
+    // and the real acceleration formula could only ever compute 0.
+    {
+        int nroad = r1_setup_engines();
+        ottd_log("R1: engines set up, %d road engines (first id=%d)", nroad, r1_first_road_engine());
+    }
     _settings_game.economy.allow_town_roads = true;
     _settings_game.construction.build_on_slopes = true;
     _settings_game.game_creation.ending_year = 0;
