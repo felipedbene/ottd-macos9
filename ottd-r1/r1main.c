@@ -20,7 +20,7 @@
 
 /* Bumped every deploy so the sink trace unambiguously identifies which binary ran
  * (a stale previously-decoded app on the Mac produces confusingly identical traces). */
-#define B2_BUILD_TAG "R1-124"
+#define B2_BUILD_TAG "R1-137"
 
 /* ROOT-CAUSE FIX ATTEMPT for the intermittent static-init anomaly:
  * C++ static constructors (blitter/driver registries, factory std::strings)
@@ -85,6 +85,7 @@ static void b2_early_heap(void)
 long b2_maxblock(void) { return (long)MaxBlock(); }
 
 extern void ottd_log_init(const char *path);
+extern void ottd_log_set_tag(const char *tag);
 extern void ottd_log(const char *fmt, ...);
 extern void ottd_log_close(void);
 extern int  b2_run(void);
@@ -96,6 +97,10 @@ extern void macnet_tcp_accept_test(void);
 int main(void)
 {
     MaxApplZone(); /* FIRST: Retro68 never grows the app heap into the SIZE partition */
+    /* Before ottd_log_init so even the "net sink UP" line is attributable: the
+     * slot pool interleaves several guests into one sink and the tag is the only
+     * thing that separates them. */
+    ottd_log_set_tag(B2_BUILD_TAG);
     ottd_log_init("ottd-r1.txt");
     ottd_log("=== B2 build %s: R1 LIVE town (engine ticks each frame) ===", B2_BUILD_TAG);
     {

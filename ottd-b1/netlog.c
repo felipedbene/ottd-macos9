@@ -51,6 +51,24 @@ extern void  statsd_close(void);
 static char g_path[256];
 static int  g_net = 0;   /* 1 once the UDP endpoint is open */
 
+/* Run tag stamped on every line as "[<tag>] ".
+ *
+ * The pool runs N guests at once and they all report to the ONE k8s sink, which
+ * NATs every sender to the same address -- so the datagram's source tells you
+ * nothing about which VM sent it. Without a per-line tag the only marker is the
+ * boot banner, and a reader slicing "banner to next banner" silently mixes three
+ * runs together: a 3-slot fan-out produced ticks [1, 384, 128] and "houses
+ * decreased" for a slot that was in fact healthy. The tag is a compile-time
+ * constant (each slot is built with its own), so this costs nothing at runtime. */
+static char g_tag[32];
+
+void ottd_log_set_tag(const char *tag)
+{
+    if (tag == 0) { g_tag[0] = '\0'; return; }
+    strncpy(g_tag, tag, sizeof(g_tag) - 1);
+    g_tag[sizeof(g_tag) - 1] = '\0';
+}
+
 static void file_line(const char *s, int len)
 {
     FILE *f;
@@ -97,10 +115,20 @@ void ottd_log(const char *fmt, ...)
     va_list ap;
 
     if (g_path[0] == '\0' && !g_net) return;
+
+    /* "[tag] " first so every line is attributable to one run even when several
+     * guests interleave into the shared sink. */
+    n = 0;
+    if (g_tag[0] != '\0')
+        n = (int)sprintf(buf, "[%s] ", g_tag);
+
     va_start(ap, fmt);
-    n = vsnprintf(buf, sizeof(buf), fmt, ap);
+    {
+        int m = vsnprintf(buf + n, sizeof(buf) - (size_t)n, fmt, ap);
+        if (m < 0) m = 0;
+        n += m;
+    }
     va_end(ap);
-    if (n < 0) n = 0;
     if (n > (int)sizeof(buf)) n = (int)sizeof(buf);
 
     /* UDP confirmed working -> pure fire-and-forget (no per-line File Manager churn). */

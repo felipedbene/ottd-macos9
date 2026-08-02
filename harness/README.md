@@ -4,66 +4,136 @@ Bun-blog-style loop (https://bun.com/blog/bun-in-rust): every gate is mechanical
 agent can iterate on the Mac OS 9 port without a human booting VMs or eyeballing screens.
 
 ```
-harness/loop.sh            # ONE iteration: halt → deploy → start → sink assertions → screendump
+harness/loop-pool.sh <slot>     # ONE iteration on one pool slot
+harness/fanout.sh <n>           # n builds tested CONCURRENTLY on n slots, one wave
 ```
 
-One iteration ≈ 6–9 min unattended: **halt** the VM (frees the AFP lock on the running app),
-incremental build (8s for a 1-file change, 82s full) + deploy 1.7s, **start** (OS 9 cold boot +
-auto-launch ~4–5 min under TCG), then 3 heartbeats of telemetry judged by 12 assertions.
-Artifacts land in `harness/artifacts/<TAG>/` (sink slice, verdict, PNG).
+Everything runs on **mactrash-can** (`felipe@10.0.1.53`), a Fedora box with 6 real cores.
+CT-100 is retired: `loop.sh`, `vm.sh` and `remote/run-os9.sh` are gone, and with them the AFP
+share, its single-app lock, and the unmount/halt/remount dance the old loop needed.
+Each slot is an independent `qemu-system-ppc` Mac OS 9 guest — own disk, own payload CD, own
+QMP/VNC port — so N builds are under test at once. Artifacts land in `harness/artifacts/<TAG>/`
+(sink slice, verdict, PNG).
 
-The loop is **halt → deploy → start**, NOT deploy-then-reset: a *running* guest holds
-`openttd - latest` open over AFP, so deploy's mv-over-the-app fails "Resource busy" until the
-guest is gone. `loop.sh` unmounts this Mac's AFP session cleanly first (so `release_share_lock`
-can't sweep it up and drop `/Volumes/vintage`), halts the VM, then remounts the share at the
-exact path before deploying.
+```
+slot N   disk   slotN.qcow2      COLD: fresh COW overlay on golden-os9.qcow2
+                                 WARM: reflink copy of golden-warm.qcow2 + -loadvm warm
+         cd     payload-slotN.iso   HFS CD, volume "SLOT", carrying THIS slot's build
+         QMP    127.0.0.1:$((4444 + N))
+         VNC    :N
+         MAC    52:54:00:9a:bc:0N
+```
+
+## Cold vs warm
+
+| | boot to launchable desktop | how the build arrives | status |
+|---|---|---|---|
+| **COLD** (default) | ~65–85 s (`BOOT_WAIT=120` for headroom) | ISO attached at QEMU start | proven 1 and 3 slots |
+| **WARM=1** | ~1 s resume + ~25 s mount (`WARM_SETTLE=40`) | ISO inserted over QMP after the resume | **one slot only** |
+
+`WARM=1` needs `pool.sh warm-create` once — it boots a seed guest off a copy of the golden
+image, tidies the desktop, unmounts the AFP share, ejects the CD, and saves a `warm` vmstate
+snapshot into `golden-warm.qcow2`. Every slot then reflink-copies that file and resumes it.
+
+**Warm is single-slot only.** One warm slot is 12/12, reproduced three times, and turns a
+~150 s cold boot into ~25 s. Several slots resuming together wedge the guests: within about a
+minute the framebuffer freezes byte-for-byte, the menu clock stops, an inserted CD never
+appears on the desktop — and QEMU still burns 95% CPU, so `query-status` happily says
+`running`. Every 3-slot warm wave hit it; slot 1 survives only because it is launched before
+the freeze and the running app has its own event loop. **Root cause not found.** Cold waves
+are unaffected (3/3, twice), so use the cold path to fan out.
 
 ## Pieces
 
-| Script | Does | Verify story |
-|---|---|---|
-| `deploy.sh [--no-bump]` | bumps `B2_BUILD_TAG` (R1-NNN+1) in `ottd-r1/r1main.c`, runs the mtime-gated `build.sh compile` + cmake `ottdr1_APPL`, archives `ottdr1-<TAG>.bin` on the share and installs `ottdr1-latest` (real app: data+rsrc forks + APPL FinderInfo survive plain `cp` to the FreeNAS AFP share) | prints ✓ per fork/size check |
-| `vm.sh install\|start\|stop\|halt\|reset\|status\|screendump <png>` | drives QEMU on CT 100 (`root@10.0.2.8`, key `~/.ssh/id_openclaw`) over QMP tcp:127.0.0.1:4444; QEMU runs as user `felipe` in tmux session `os9` via `/home/felipe/run-os9.sh` (in-repo copy: `remote/run-os9.sh`). `halt` = stop + wait for qemu to die + `release_share_lock` (VM left OFF, the pre-deploy step); `reset` = halt + start | `status` → `{"running": true}`; screendump → PPM → sips → PNG |
-| `assert.py --tag R1-NNN [--follow] [--from-file f]` | slices the UDP log sink by the boot banner for THIS tag; 12 assertions: banner, sink UP, world facts vs `expected.json`, engine live, ≥N heartbeats with strictly-increasing tick, liveness variance (frozen-sim detector), `money==expect` on every FIN line + net trend, zero fault lines | exit 0/1/2; validated 12/12 on real R1-105 data; fault + frozen fixtures FAIL correctly |
-| `expected.json` | known-good world facts (corners `"3/4"` until the river-router bug is fixed) | edit when a feature legitimately changes the world |
+| Script | Does |
+|---|---|
+| `deploy.sh [--no-bump] [--no-share] [--tag T]` | bumps `B2_BUILD_TAG` in `ottd-r1/r1main.c`, builds, verifies the tag is actually **in the binary**. `--no-share` skips AFP entirely (the pool path). |
+| `payload.sh <slot> [app]` | builds slot N's HFS CD (`SLOT:openttd - latest` + `ogfx1_base.grf` + `english.lng`) with `ditto` so both forks survive, verifies fork sizes + `APPL` FinderInfo against the mounted image, scp's it to the pool |
+| `pool.sh <cmd> <slot>` | `install start stop status qmp key launch screendump insert savevm loadvm warm-create list` — QMP over ssh via a real python3 client on the remote |
+| `loop-pool.sh <slot>` | one iteration: deploy → payload → start → launch → assert → screendump |
+| `fanout.sh <n> \| --apps a.APPL,b.APPL` | n builds, n slots, one wave, summary table, exit = worst verdict |
+| `assert.py --tag T [--follow]` | 12 assertions on the UDP sink slice for THIS tag: banner, sink UP, world facts vs `expected.json`, engine live, ≥N heartbeats with strictly-increasing ticks, liveness variance (frozen-sim detector), `money==expect` on every FIN line, zero fault lines |
+| `expected.json` | known-good world facts; edit when a feature legitimately changes the world |
 
 Sink access: `kubectl -n gopher-spot logs deploy/log-sink` (assert.py falls back from context
-`debene` to the current context). Lines are prefixed with the guest IP (`10.0.10.5 `).
+`debene` to the current context).
 
-## One-time setup already done
-- CT 100's `run-os9.sh` gained `-qmp tcp:127.0.0.1:4444,server=on,wait=off` (both boot modes);
-  QEMU moved from nohup to tmux (`vm.sh install` + `vm.sh start` re-provision this).
-- Mac OS 9: alias to `share:ottdr1-latest` in `System Folder:Startup Items` → every reboot
-  mounts the (guest, password-less) share and launches the newest build.
+## Run attribution: every line is tagged
+
+The sink NATs **every** sender to one address (`10.0.10.5`), so with N slots reporting at once
+the source IP identifies nothing. `netlog.c` therefore stamps each line `[<tag>] ` from
+`ottd_log_set_tag(B2_BUILD_TAG)`, and `assert.py` filters the stream by tag.
+
+Without this, slicing "banner to next banner" silently interleaves three runs: a 3-slot wave
+produced ticks `[1, 384, 128]` and "houses decreased" for a slot that was in fact healthy.
+Untagged lines are kept only when *nothing* in the stream is tagged, so old fixtures still work.
+
+Per-slot builds are `<base>-s<N>` (`R1-131-s1`, `-s2`, `-s3`) — same source, one tag each. To
+fan out N genuinely different features, build each in its own worktree and pass the binaries:
+`fanout.sh --apps /path/a.APPL,/path/b.APPL` (the tag is read back out of each `.APPL`).
 
 ## Gotchas (fought and won)
-- **busybox `nc` closes on stdin EOF** → QMP needs `( printf '<cap>\n<cmd>\n'; sleep 2 ) | nc`,
-  and every connection starts with the `qmp_capabilities` handshake.
-- **Never `pgrep -f qemu` over ssh** — the pattern matches the remote shell itself and kills your
-  own session. `vm.sh stop` uses QMP `quit`, then `tmux kill-session`.
-- **`build.sh all` always exits 1** — its probe `link` segfaults on the expected `b2_scene_init`
-  dup (b2_scene.o vs r1_scene.o). The real link is cmake's (excludes b2_scene.o). deploy.sh
-  therefore calls `build.sh compile`; real compile errors still abort (`set -e` intact).
-- **mtime gating**: a TU rebuilds when its `.o` is older than source, `build.sh`, or
-  `compat/libc_compat.h`. `FORCE=1 bash build.sh all` bypasses. Header changes beyond
-  libc_compat are NOT tracked — `FORCE=1` after touching shared headers.
-- **Money is not monotonic** between heartbeats (daily costs); the FIN gate is
-  `money==expect` (strict) + net trend, not per-beat growth.
-- **QMP screendump returns before the PPM is written** — vm.sh waits 2s before scp; sips
+
+- **`netlog.o` was built by nothing and tracked by nothing.** `netlog.c` needs Apple's Universal
+  Interfaces (`toolchain/otsdk/CIncludes`) while `add_application()` builds against multiversal,
+  which has no Open Transport — so no cmake target compiles it, and `.gitignore`'s `*.o` keeps it
+  out of the repo. A fresh clone therefore linked against a file that did not exist, and an edit to
+  the `.c` silently linked the *previous* object (or died with `undefined reference to
+  .ottd_log_set_tag` once the edit added a symbol — which is exactly how this was found).
+  `ottd-b1/build-netlog.sh` builds it (`-std=gnu11`: `otsdk/MacTypes.h` enumerates `false`, a
+  keyword from C23 on) and `ottd-r1/build.sh` now invokes it whenever the object is missing or
+  older than the source.
+- **`blockdev-change-medium` takes `"device"`, not `"id"`.** `pay0` is the `-drive` alias and the
+  `ide-cd` device has no qdev id, so the `id` form answers `DeviceNotFound`. That error, once
+  discarded to `/dev/null`, is the whole reason the pool was believed to need a cold boot per
+  build — OS 9 mounts an inserted CD fine, the insert had simply never happened.
+- **`snapshot-save` addresses block NODES, not `-drive` ids.** Passing `hd0` created a job that
+  *concluded* — with `error: "No block device node 'hd0'"`. Since success also looks like
+  "concluded", the poll called it saved and `warm-create` produced an image with no snapshot in
+  it. The root disk now carries `node-name=os9root`, and `job_wait` fails on a job's `error`.
+- **A stalled sink looks exactly like a hang.** `assert.py` reports `HANG: no heartbeat for 90s`
+  when telemetry stops — but the guest may be perfectly healthy. One "hung" slot's screendump
+  showed OpenTTD alive at year 1950, population 1632, hundreds of ticks past its last heartbeat;
+  only its UDP log lines had stopped arriving. `netlog`'s Open Transport send is non-blocking and
+  drops under burst. **Always check the screendump before believing a HANG verdict** — this is the
+  same screen-vs-telemetry gap the Vision-OCR roadmap item closes.
+- **Type-select is a timing budget, not a string.** The Finder resets its type-select buffer after
+  ~1.3 s and `sendkeys` spaces chords 0.3 s apart, so a 7-character prefix (2.1 s) *always* resets
+  mid-word and selects the wrong thing — silently. `warm-create` typed `vintage` and left the share
+  mounted; the launch recipe typed `openttd` and got away with it only because every partial match
+  still lands on the right file. Use the shortest unique prefix (`sl`, `op`, `v`).
+- **Cmd-E is Eject, Cmd-Y is Put Away.** Cmd-E does nothing to a *server* volume, so the AFP share
+  survived two attempts to unmount it from the warm seed.
+- **`send-key` hold-time is guest time.** QEMU's 100 ms default can pass without a contended guest
+  polling its USB HID device, and the keystroke is never seen. `sendkeys` sets `hold-time: 200`.
+- **Retro68 `_open_r` hardcoded `fsRdWrPerm`** (computed `permission` then ignored it), so every
+  `fopen(..., "rb")` failed on read-only media: the CD payload listed fine via `PBGetCatInfo` but
+  gave "Cannot open file 'ogfx1_base.grf'". Fixed in `Retro68/libretro/syscalls.c`; rebuild with
+  `cd Retro68-build/build-target-ppc/libretro && make retrocrt`.
+- **make's mtime granularity is one second**, so back-to-back `--tag` builds produced *byte-identical*
+  binaries — three "different" fan-out builds were the same build. `deploy.sh set_tag` now deletes
+  the whole chain (`r1main.c.obj`, `.xcoff`, `.pef`, `.bin`, `.APPL`, `.ad`, `%.ad`).
+- **`strings … | grep -q` + `set -o pipefail`** fails the pipeline via SIGPIPE on the producer.
+  The tag gate counts into a variable instead: `grep -cxF "$TAG" || true`.
+- **OS 9 will not mount a bare hdiutil HFS+ hard disk** (no `Apple_Driver_ATA` partition — only
+  Drive Setup writes one). It mounts an HFS **CD-ROM** with no driver at all. Hence the payload CD.
+- **`cp` drops the resource fork** onto an HFS image (`rsrc=0`); `ditto` preserves it.
+- **QMP screendump returns before the PPM is written** — `pool.sh` waits 2 s before scp; `sips`
   converts QEMU's PPM natively.
-- A stale previously-launched app produces confusingly identical traces — that's why deploy.sh
-  ALWAYS bumps the tag and assert.py keys on the banner: stale runs are rejected by construction.
-- **AFP lock + mount churn**: `release_share_lock` kills the FreeNAS afpd session holding an fd on
-  the app's `.AppleDouble`. Because this Mac *writes* the app during deploy, its OWN afpd session
-  can hold that fd and get killed too — dropping `/Volumes/vintage`, and the unclean drop makes the
-  remount auto-rename to `/Volumes/vintage-1` (deploy needs the exact path). `loop.sh` fixes this by
-  unmounting cleanly *before* halt and clearing stray `vintage-N` mounts before remounting.
-- **`loop.sh` with no args**: forward `"$@"` (not `"${1:-}"`, which passes an empty-string arg that
-  `deploy.sh` rejects as unknown). `loop.sh --no-bump` re-runs the current tag.
-- **On-screen text must go through a real Window** (`DrawWidget`/`DrawString`): `r1_viewport_draw` is
-  dead code under `-DR1_MERGE` (its only caller is `#ifndef R1_MERGE`), so a viewport-drawn HUD never
-  blits. The 12 gates test *telemetry*, not pixels — a correct-but-invisible HUD passes green (exactly
-  the "screen ≠ telemetry" gap the Vision-OCR roadmap item closes). See the R1-117 cash bar.
+- **`meta_l` is Command** on this guest. The Finder drops keystrokes sent back-to-back, so
+  `sendkeys` sleeps 0.35 s between chords, and type-select needs the target window *open* before
+  the next chord group (hence the 3 s pause in `launch`).
+- **Money is not monotonic** between heartbeats (daily costs); the FIN gate is `money==expect`
+  (strict) + net trend, not per-beat growth.
+- **On-screen text must go through a real Window** (`DrawWidget`/`DrawString`): `r1_viewport_draw`
+  is dead code under `-DR1_MERGE`, so a viewport-drawn HUD never blits. The 12 gates test
+  *telemetry*, not pixels — a correct-but-invisible HUD passes green (exactly the "screen ≠
+  telemetry" gap the Vision-OCR roadmap item closes). See the R1-117 cash bar.
+
+## Concurrency
+
+Each TCG guest is ~1 host core; mactrash-can has 6 real cores (12 threads), so n≤6 runs at full
+speed. Measured: 3 concurrent VMs ≈ 80% CPU each, load 2.26/12.
 
 ## Roadmap (v2)
 1. **Vision-OCR cross-check**: macOS Vision (`VNRecognizeTextRequest`, pyobjc) OCRs the

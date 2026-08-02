@@ -21,22 +21,67 @@ APP_NAME="openttd - latest"   # name chosen on the OS 9 side; Startup Items alia
 die() { echo "deploy.sh: FATAL: $*" >&2; exit 1; }
 
 BUMP=1
-for arg in "$@"; do
-  case "$arg" in
+SHARE_DEPLOY=1
+SET_TAG=""
+while [ $# -gt 0 ]; do
+  case "$1" in
     --no-bump) BUMP=0 ;;
-    *) die "unknown argument: $arg (only --no-bump is supported)" ;;
+    # --no-share: bump + build only, skip the AFP copy. The slot pool carries the
+    # build on a per-slot payload CD instead (harness/payload.sh), so the share is
+    # not in the loop at all. Prints "TAG=<tag>" for the caller to read.
+    --no-share) SHARE_DEPLOY=0 ;;
+    # --tag <TAG>: build under an exact tag instead of bumping. Fan-out needs this:
+    # concurrent slots all report to one sink that NATs every sender to the same
+    # IP, so the tag is the ONLY thing telling two live runs apart. fanout.sh gives
+    # each slot "<base>-s<N>". assert.py's banner regex already allows the suffix.
+    --tag) shift; [ $# -gt 0 ] || die "--tag needs a value"; SET_TAG="$1" ;;
+    *) die "unknown argument: $1 (supported: --no-bump, --no-share, --tag <TAG>)" ;;
   esac
+  shift
 done
 
 # --- tag ---------------------------------------------------------------------
-cur_tag=$(sed -n 's/^#define B2_BUILD_TAG "\(R1-[0-9]*\)".*/\1/p' "$MAIN")
+# Any tag shape is readable, not just R1-<n>: once fan-out writes "R1-125-s3" the
+# old digits-only pattern would fail to read the file it just wrote.
+cur_tag=$(sed -n 's/^#define B2_BUILD_TAG "\([^"]*\)".*/\1/p' "$MAIN")
 [ -n "$cur_tag" ] || die "could not read B2_BUILD_TAG from $MAIN"
 
-if [ "$BUMP" = 1 ]; then
-  n=${cur_tag#R1-}
+set_tag() { # set_tag <new>
+  sed -i '' "s/#define B2_BUILD_TAG \"$cur_tag\"/#define B2_BUILD_TAG \"$1\"/" "$MAIN"
+  grep -q "#define B2_BUILD_TAG \"$1\"" "$MAIN" || die "tag sed failed in $MAIN"
+  # Drop r1main's object AND the link products so the tag change cannot be missed.
+  # make compares whole seconds and treats "same second" as up-to-date, so two
+  # builds inside one second (exactly what fanout.sh does) silently kept the OLD
+  # tag: first the stale .obj, then — once that was deleted — a stale link, whose
+  # .xcoff was written in the same second as the fresh .obj. Three "different"
+  # fan-out builds came out byte identical. Deleting both ends of the chain makes
+  # the rebuild unconditional; the post-build tag gate proves it worked.
+  # Every output of the chain, not just some: the APPL step emits .pef/.ad/%.ad
+  # alongside .bin/.APPL, and make skipped the whole custom command while any one
+  # of them still looked current.
+  rm -f "$R1/build/CMakeFiles/ottdr1.dir/r1main.c.obj" \
+        "$R1/build/ottdr1.xcoff" "$R1/build/ottdr1.pef" "$R1/build/ottdr1.bin" \
+        "$R1/build/ottdr1.APPL" "$R1/build/ottdr1.ad" "$R1/build/%ottdr1.ad"
+}
+
+if [ -n "$SET_TAG" ]; then
+  if [ "$SET_TAG" = "$cur_tag" ]; then
+    echo "== tag: $cur_tag (--tag, unchanged)"
+  else
+    set_tag "$SET_TAG"
+    echo "== tag: $cur_tag -> $SET_TAG (--tag)"
+  fi
+  TAG=$SET_TAG
+elif [ "$BUMP" = 1 ]; then
+  # Bump the numeric part only, dropping ANY suffix (fan-out writes "-s3", ad-hoc
+  # builds write whatever), so a normal iteration after a fan-out returns to the
+  # plain R1-<n+1> series instead of choking on a non-numeric tail.
+  n=$(printf '%s' "$cur_tag" | sed -E 's/^R1-([0-9]+).*/\1/')
+  case "$n" in
+    ''|*[!0-9]*) die "cannot read a numeric build number from tag '$cur_tag' — pass --tag explicitly" ;;
+  esac
   new_tag="R1-$((n + 1))"
-  sed -i '' "s/#define B2_BUILD_TAG \"$cur_tag\"/#define B2_BUILD_TAG \"$new_tag\"/" "$MAIN"
-  grep -q "#define B2_BUILD_TAG \"$new_tag\"" "$MAIN" || die "tag bump sed failed in $MAIN"
+  set_tag "$new_tag"
   echo "== tag: $cur_tag -> $new_tag"
   TAG=$new_tag
 else
@@ -59,7 +104,25 @@ APP=$R1/build/ottdr1.APPL
 [ -f "$BIN" ] || die "missing build product $BIN"
 [ -f "$APP" ] || die "missing build product $APP"
 
+# The tag is the harness's only handle on a run: assert.py slices the sink by the
+# banner, and concurrent slots are told apart by nothing else. A binary carrying
+# the wrong tag is therefore worse than a build failure — it reports green under
+# someone else's name. Prove the tag we just set is the tag that got compiled.
+# Count rather than `grep -q`: under `set -o pipefail`, grep -q closes the pipe on
+# the first match, `strings` dies of SIGPIPE, and the pipeline reports failure —
+# which made this gate fail every build it was supposed to pass.
+tag_hits=$(strings "$APP" 2>/dev/null | grep -cxF "$TAG" || true)
+[ "${tag_hits:-0}" -gt 0 ] || die "built app does NOT contain tag '$TAG' — the compile did not pick up the tag change"
+echo "== build carries tag $TAG (verified in the binary)"
+
 # --- deploy ------------------------------------------------------------------
+if [ "$SHARE_DEPLOY" = 0 ]; then
+  echo "== build OK (--no-share: skipping the AFP copy)"
+  echo "   APP: $APP"
+  echo "TAG=$TAG"
+  exit 0
+fi
+
 mount | grep -q " on $SHARE " || die "$SHARE is not mounted — mount the vintage AFP share first"
 [ -d "$SHARE" ] || die "$SHARE is not a directory"
 

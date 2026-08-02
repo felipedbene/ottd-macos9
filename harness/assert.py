@@ -51,8 +51,13 @@ HEARTBEAT_GAP_S = 90.0
 PREAMBLE_LINES = 5  # lines before the banner scanned for sink_up
 
 # ---------------------------------------------------------------- regexes
-# Optional "<ipv4> " prefix stamped by the sink on every datagram line.
+# Optional "<ipv4> " prefix stamped by the sink on every datagram line, then an
+# optional "[<tag>] " stamped by the app itself (netlog.c). The sink NATs every
+# sender to one address, so with the pool running N guests at once the IP is
+# useless for attribution and this tag is the only way to tell interleaved runs
+# apart. Older logs and the test fixtures have no tag; both shapes must parse.
 RE_PREFIX = re.compile(r"^(?:\d{1,3}(?:\.\d{1,3}){3}\s+)?(.*)$")
+RE_RUNTAG = re.compile(r"^\[([A-Za-z0-9._-]+)\]\s(.*)$")
 
 RE_BANNER = re.compile(r"^=== B2 build ([A-Za-z0-9._-]+): .* ===$")
 RE_SINK_UP = re.compile(r"^net sink UP -> \S+ \(OT err=0\)$")
@@ -87,7 +92,33 @@ RE_FAULTS = [
 
 
 def strip_prefix(raw):
-    return RE_PREFIX.match(raw.rstrip("\n")).group(1)
+    """Strip the sink's IP prefix and the app's "[tag] " prefix. Message only."""
+    body = RE_PREFIX.match(raw.rstrip("\n")).group(1)
+    m = RE_RUNTAG.match(body)
+    return m.group(2) if m else body
+
+
+def line_tag(raw):
+    """The run tag stamped on this line, or None if it is an untagged line."""
+    body = RE_PREFIX.match(raw.rstrip("\n")).group(1)
+    m = RE_RUNTAG.match(body)
+    return m.group(1) if m else None
+
+
+def filter_by_tag(lines, tag):
+    """Keep only lines belonging to `tag`.
+
+    Concurrent slots interleave into one sink, so a run must be separated by tag
+    BEFORE any banner-based slicing — otherwise a slice picks up other slots'
+    heartbeats and reports nonsense (observed: ticks [1, 384, 128] and "houses
+    decreased" for a slot that was actually healthy).
+
+    Untagged lines are kept only when nothing in the stream is tagged at all, so
+    pre-tag logs and the fixtures keep working unchanged.
+    """
+    if not any(line_tag(l) is not None for l in lines):
+        return lines
+    return [l for l in lines if line_tag(l) in (tag, None)]
 
 
 # ---------------------------------------------------------------- kubectl
@@ -137,6 +168,8 @@ def slice_last_run(lines, tag):
     A run = lines from its banner up to (not including) the next banner of
     any tag, or EOF. Returns (None, None) if no banner with the tag exists.
     """
+    # Separate this run from any concurrent slots BEFORE slicing by banner.
+    lines = filter_by_tag(lines, tag)
     banners = []  # (index, tag)
     for i, raw in enumerate(lines):
         m = RE_BANNER.match(strip_prefix(raw))
@@ -206,6 +239,13 @@ def follow_collect(context, tag, boot_timeout, beats):
                     die_harness("kubectl log stream ended before banner: %s"
                                 % err.strip())
                 break
+            # Drop lines belonging to another slot before they can be mistaken
+            # for this run's heartbeats or for a next-run banner that would cut
+            # this slice short. Untagged lines (pre-tag builds, and the
+            # "net sink UP" line, which bypasses ottd_log) still pass.
+            lt = line_tag(raw)
+            if lt is not None and lt != tag:
+                continue
             msg = strip_prefix(raw)
             m = RE_BANNER.match(msg)
             if run is None:

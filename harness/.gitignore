@@ -1,2 +1,6 @@
 # Test outputs from loop.sh iterations (screenshots, sink slices, verdicts)
 artifacts/
+
+# Cached third-party game data the payload CD needs (seeded from the vintage share)
+assets/
+__pycache__/
