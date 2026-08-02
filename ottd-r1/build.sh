@@ -18,7 +18,7 @@ B2=/Users/felipe/ottd-macos9/ottd-b2
 R1=/Users/felipe/ottd-macos9/ottd-r1
 TCLIB=/Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/lib
 
-CXXFLAGS=(-std=c++17 -DNO_THREADS -DTTD_ENDIAN=TTD_BIG_ENDIAN -DR1_MERGE -DR1_STRINGS -DNDEBUG -include "$COMPAT/libc_compat.h" -Os)
+CXXFLAGS=(-std=c++17 -DNO_THREADS -DTTD_ENDIAN=TTD_BIG_ENDIAN -DR1_MERGE -DR1_STRINGS -DR1_REAL_VEHICLE_STACK -DNDEBUG -include "$COMPAT/libc_compat.h" -Os)
 INCS=(-I"$COMPAT" -I"$OTTD/src" -I"$OTTD/src/3rdparty" -I"$OTTD/src/3rdparty/squirrel/include" -I"$OTTD/src/script/api" -I"$GEN" -I"$GEN/script/api")
 
 # --- mtime gating -----------------------------------------------------------
@@ -42,14 +42,23 @@ up_to_date() {
 # Real OpenTTD engine TUs (recompiled with the merge flags).
 # viewport.cpp = the game's real renderer; void_cmd.cpp = the MP_VOID tile proc it
 # dereferences for off-map/border tiles (replaces the zeroed void stub in deadpools).
-SRC_TUS=(date.cpp core/pool_func.cpp town_cmd.cpp landscape.cpp clear_cmd.cpp road_cmd.cpp road_map.cpp void_cmd.cpp gfx_layout.cpp fontcache.cpp fontcache/spritefontcache.cpp tree_cmd.cpp townname.cpp widgets/dropdown.cpp toolbar_gui.cpp cargotype.cpp)
+# REAL VEHICLE STACK (R1-139). roadveh_cmd/vehicle/engine/order_cmd/roadstop/rail/
+# ground_vehicle replace the hand-rolled RoadVehicle/Order/Engine stubs that stood in
+# for them (those are now behind #ifndef R1_REAL_VEHICLE_STACK). YAPF is NOT linked:
+# roadveh_cmd reaches the pathfinder through exactly two functions, both backed by the
+# BFS in m1_pathfind.cpp -- see ottd-m1/m1_realveh_stubs.cpp.
+# NOTE: do NOT add cargopacket.cpp here. It drags in the CargoAction operators and
+# FlowStat and collides with the hand-rolled CargoPacket specializations in
+# m1_station.cpp -- measured: it makes the link surface worse, not better.
+SRC_TUS=(roadveh_cmd.cpp vehicle.cpp engine.cpp order_cmd.cpp roadstop.cpp rail.cpp ground_vehicle.cpp \
+         core/pool_func.cpp town_cmd.cpp landscape.cpp clear_cmd.cpp road_cmd.cpp road_map.cpp void_cmd.cpp gfx_layout.cpp fontcache.cpp fontcache/spritefontcache.cpp tree_cmd.cpp townname.cpp widgets/dropdown.cpp toolbar_gui.cpp cargotype.cpp)
 # viewport.cpp is compiled from a PATCHED copy (below): DoSetViewportPosition forced to full-redraw
 # instead of GfxScroll's in-place _screen memmove (which tears the Mac's single QuickDraw buffer on
 # drag-to-pan, vertical especially). Handled separately so the sed patch applies.
 # M1 support TUs (shims/stubs/pools) — engine-calibrated, minus the gfx-owned dups.
 # m1_viewport_stubs = no-op window/vehicle/sign surface viewport.cpp links against.
 # m1_text_stubs = the 4 symbols the real font/layout TUs need (config/utf8/glyphs).
-M1_TUS=(m1_shims m1_methods m1_pools m1_profiling_stub m1_town_stubs m1_cmd_stubs m1_land_stubs m1_road_stubs m1_viewport_stubs m1_text_stubs m1_world_stubs m1_water_draw m1_industry_draw m1_window_stubs m1_strings_stubs m1_toolbar_stubs m1_company m1_vehicle m1_economy m1_finance_gui m1_industry m1_town_directory_gui m1_station m1_company_gui m1_station_gui m1_vehicle_list_gui m1_graph_gui m1_station_draw m1_order m1_pathfind m1_town_gui m1_industry_gui m1_smallmap_gui m1_subsidy_gui m1_rail_draw m1_train)
+M1_TUS=(m1_shims m1_methods m1_pools m1_profiling_stub m1_town_stubs m1_cmd_stubs m1_land_stubs m1_road_stubs m1_viewport_stubs m1_text_stubs m1_world_stubs m1_water_draw m1_industry_draw m1_window_stubs m1_strings_stubs m1_toolbar_stubs m1_company m1_vehicle m1_economy m1_finance_gui m1_industry m1_town_directory_gui m1_station m1_company_gui m1_station_gui m1_vehicle_list_gui m1_graph_gui m1_station_draw m1_order m1_pathfind m1_town_gui m1_industry_gui m1_smallmap_gui m1_subsidy_gui m1_rail_draw m1_train m1_realveh_stubs m1_rvstub_airsea m1_rvstub_group m1_rvstub_econ m1_rvstub_infra)
 
 # --- parallel compile --------------------------------------------------------
 # The 60 TUs are independent single `g++ -c src -o obj` calls, and they used to run
@@ -126,11 +135,26 @@ compile_all() {
   if up_to_date "$R1/obj/m1_deadpools.o" "$M1/m1_deadpools.c"; then
     echo "  skip (up-to-date) m1_deadpools"
   else
-    queue_cc "$M1/m1_deadpools.c" "CC  m1_deadpools" "$GCC" -DR1_MERGE -DR1_STRINGS -c "$M1/m1_deadpools.c" -o "$R1/obj/m1_deadpools.o"
+    queue_cc "$M1/m1_deadpools.c" "CC  m1_deadpools" "$GCC" -DR1_MERGE -DR1_STRINGS -DR1_REAL_VEHICLE_STACK -c "$M1/m1_deadpools.c" -o "$R1/obj/m1_deadpools.o"
   fi
 
   # The three sed-patched TUs write distinct *_patched.cpp files, so the rewrite is
   # done here (it costs milliseconds) and only the compile is queued.
+  # date.cpp calls EnginesDailyLoop() once per game-day, and that name now belongs to the
+  # real engine.cpp (engine availability/previews). R1's own daily expense charge used to BE
+  # that function; it is now m1_economy.cpp's r1_daily_expenses and would simply stop running
+  # -- silently flattening the finance window and breaking the fin_invariant gate. date.cpp is
+  # already ours to compile, so patch the one call site to run both.
+  echo "== date.cpp (also call R1's daily expenses) =="
+  if up_to_date "$R1/obj/date.o" "$OTTD/src/date.cpp"; then
+    echo "  skip (up-to-date) date"
+  else
+    sed -e 's|^extern void EnginesDailyLoop();|extern void EnginesDailyLoop();\nextern "C" void r1_daily_expenses();|' \
+        -e 's|^\tEnginesDailyLoop();|\tEnginesDailyLoop();\n\tr1_daily_expenses();|' \
+        "$OTTD/src/date.cpp" > "$R1/obj/date_patched.cpp"
+    queue_cc "$R1/obj/date_patched.cpp" "CXX date" "$GXX" "${CXXFLAGS[@]}" "${INCS[@]}" -c "$R1/obj/date_patched.cpp" -o "$R1/obj/date.o"
+  fi
+
   echo "== viewport.cpp (DoSetViewportPosition forced to full-redraw: no GfxScroll in-place _screen"
   echo "   memmove, which tears the Mac's single QuickDraw buffer on drag-to-pan, vertical especially) =="
   if up_to_date "$R1/obj/viewport.o" "$OTTD/src/viewport.cpp"; then

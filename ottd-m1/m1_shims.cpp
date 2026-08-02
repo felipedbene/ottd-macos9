@@ -132,8 +132,14 @@ void StationMonthlyLoop() {}      // station_cmd.cpp
 void SubsidyMonthlyLoop() {}      // subsidy.cpp
 void DisasterDailyLoop() {}       // disaster_vehicle.cpp
 /* EnginesDailyLoop now REAL — repurposed as the daily company/vehicle expense charge (m1_economy.cpp, R1-87). */
+#ifndef R1_REAL_VEHICLE_STACK
+/* Superseded by the real TU (engine.cpp). */
 void EnginesMonthlyLoop() {}
-void VehiclesYearlyLoop() {}      // vehicle.cpp
+#endif
+#ifndef R1_REAL_VEHICLE_STACK
+/* Superseded by the real TU (vehicle.cpp). */
+void VehiclesYearlyLoop() {}
+#endif      // vehicle.cpp
 
 // ---------------------------------------------------------------------------
 // (further stubs appended as the iterative link surfaces them)

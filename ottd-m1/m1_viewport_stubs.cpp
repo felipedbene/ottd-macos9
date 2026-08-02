@@ -121,7 +121,10 @@ void GuiShowTooltips(Window *, StringID, uint, const uint64 *, TooltipCloseCondi
 
 /* ---- click handlers (viewport hit-testing; off the render path) ---- */
 void HandleClickOnSign(const Sign *) {}
+#ifndef R1_REAL_VEHICLE_STACK
+/* Superseded by the real TU (vehicle.cpp). */
 Vehicle *CheckClickOnVehicle(const Viewport *, int, int) { return nullptr; }
+#endif
 bool VehicleClicked(const Vehicle *) { return false; }
 void StartStopVehicle(const Vehicle *, bool) {}
 

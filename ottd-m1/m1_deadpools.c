@@ -62,7 +62,15 @@ char _global_string_params[4096] = {0};
  * we never emit). Global-scope symbols are unmangled so these C defs bind the C++
  * `extern <Type> _sym;` declarations. Generously sized. */
 #ifdef R1_STRINGS
+#ifndef R1_REAL_VEHICLE_STACK
+/* Superseded by the real TU (engine.cpp owns _engine_pool).
+ * This MUST stay guarded: both definitions land in BSS, and the XCOFF linker MERGES
+ * same-named BSS symbols silently instead of erroring -- the link stays clean while
+ * the real EnginePool constructor writes into storage sized by this 8192-byte array.
+ * The result is heap corruption during static init and a Type 2 crash before main()
+ * can log anything. Note the C compile line in build.sh must pass the define too. */
 char _engine_pool[8192]        = {0};
+#endif
 char _group_pool[8192]         = {0};
 #ifndef R1_MERGE  /* real CurrencySpec _currency_specs[] lives in m1_finance_gui.cpp (R1-79); a zeroed
                      char[] would bus-error the {CURRENCY_LONG} formatter on its null std::string prefix */

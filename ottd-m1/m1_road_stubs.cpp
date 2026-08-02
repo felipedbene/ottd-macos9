@@ -70,9 +70,12 @@ CommandCost CheckTileOwnership(TileIndex) { return CommandCost(); }
 
 /* Vehicle-presence over the EMPTY vehicle pool: "no vehicle here" == success.
  * FindVehicleOnPos returns void; leaving `proc` uncalled means nothing found. */
+#ifndef R1_REAL_VEHICLE_STACK
+/* Superseded by the real TU (vehicle.cpp). */
 CommandCost EnsureNoVehicleOnGround(TileIndex) { return CommandCost(); }
 CommandCost TunnelBridgeIsFree(TileIndex, TileIndex, const Vehicle *) { return CommandCost(); }
 void FindVehicleOnPos(TileIndex, void *, VehicleFromPosProc *) {}
+#endif
 
 /* Road-type validity: ON the CmdBuildRoad exec path — MUST accept ROADTYPE_ROAD
  * (road.cpp is not compiled, so we own this). */
@@ -89,7 +92,10 @@ void DirtyCompanyInfrastructureWindows(CompanyID) {}
 
 /* ---- depots / vehicles ---- */
 void ShowDepotWindow(TileIndex, VehicleType) {}
+#ifndef R1_REAL_VEHICLE_STACK
+/* Superseded by the real TU (vehicle.cpp). */
 void VehicleEnterDepot(Vehicle *) {}
+#endif
 
 /* ---- rail-crossing / rail ---- */
 void UpdateLevelCrossing(TileIndex, bool, bool) {}
@@ -124,8 +130,11 @@ void DrawCommonTileSeqInGUI(int, int, const DrawTileSprites *, int32, uint32, Pa
 
 /* ---- Vehicle / Depot destructors (define ~Vehicle -> emits Vehicle vtable +
  *      typeinfo; Crash fills the remaining non-inline virtual slot) ---- */
+#ifndef R1_REAL_VEHICLE_STACK
+/* Superseded by the real TU (vehicle.cpp). */
 Vehicle::~Vehicle() {}
 uint Vehicle::Crash(bool) { return 0; }
+#endif
 Depot::~Depot() {}
 
 /* R1-89: Order::~Order() moved to m1_order.cpp (which now owns the real Order/OrderList pools).

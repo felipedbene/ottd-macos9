@@ -55,7 +55,10 @@ void BuildContentTypeStringList() {}
 
 /* --- vehicle (newgrf_engine.h) — SCC_ENGINE_NAME only --- */
 uint16 GetVehicleCallback(CallbackID, uint32, uint32, EngineID, const Vehicle *) { return 0; }
-bool Engine::IsEnabled() const { return false; }   /* only via Engine::GetIfValid over the empty pool */
+#ifndef R1_REAL_VEHICLE_STACK
+/* Superseded by the real TU (engine.cpp). */
+bool Engine::IsEnabled() const { return false; }
+#endif   /* only via Engine::GetIfValid over the empty pool */
 
 /* --- file (fileio_func.h) — InitializeLanguagePacks path we bypass (link-only) --- */
 std::string FioGetDirectory(Searchpath, Subdirectory) { return std::string(); }

@@ -29,6 +29,10 @@
 #include "safeguards.h"
 
 /* ---- the REAL Order / OrderList pools (no prior symbol anywhere — fresh) ---- */
+#ifndef R1_REAL_VEHICLE_STACK
+/* SUPERSEDED by order_cmd.cpp, which owns _order_pool, _orderlist_pool and
+ * every Order/OrderList method here. Kept behind the guard so the pre-real-
+ * vehicle-stack build still works. */
 OrderPool _order_pool("Order");
 INSTANTIATE_POOL_METHODS(Order)
 
@@ -86,16 +90,28 @@ void OrderList::Initialize(Order *chain, Vehicle *v)
 	for (const Vehicle *u = v->NextShared(); u != nullptr; u = u->NextShared()) ++this->num_vehicles;
 }
 
-/* ---- Attach a real 2-stop OT_GOTO_STATION chain to one bus Vehicle. ----
- * Allocates 2 pooled Orders (A -> B), builds one pooled OrderList over that chain,
- * points v->orders at it, and seeds v->current_order (by value) with the first stop.
- * Returns true on success, false if either pool is full (chain left untouched). */
+
+/* R1-91: OrderList::GetOrderAt (verbatim from order_cmd.cpp:357-366, that TU not compiled). The
+ * autonomous-bus re-path (r1_scene.cpp) calls v->GetOrder(leg) which forwards here to fetch the
+ * Nth order in the chain. Real walk over `first`/`next` — needed for order-driven navigation. */
+Order *OrderList::GetOrderAt(int index) const
+{
+	if (index < 0) return nullptr;
+	Order *order = this->first;
+	while (order != nullptr && index-- > 0) {
+		order = order->next;
+	}
+	return order;
+}
+#endif  /* !R1_REAL_VEHICLE_STACK */
+
+/* R1's OWN helper -- NOT an order_cmd.cpp symbol, so it stays outside the guard.
+ * Attaches the 2-stop OT_GOTO_STATION chain each bus runs on. */
 extern "C" int r1_attach_bus_orders(void *vehicle, unsigned station_a, unsigned station_b)
 {
 	Vehicle *v = (Vehicle *)vehicle;
 	if (v == nullptr) return 0;
 
-	/* Need 2 Orders + 1 OrderList available. */
 	if (!Order::CanAllocateItem(2) || !OrderList::CanAllocateItem()) return 0;
 
 	Order *o_a = new Order();
@@ -110,24 +126,9 @@ extern "C" int r1_attach_bus_orders(void *vehicle, unsigned station_a, unsigned 
 	OrderList *list = new OrderList(o_a, v);
 	v->orders = list;
 
-	/* Seed current_order with a copy of the first stop; dest_tile left as-is (the
-	 * caller/pathfinder can resolve the station tile when movement lands). */
 	v->current_order.MakeGoToStation((StationID)station_a);
 
 	return 1;
-}
-
-/* R1-91: OrderList::GetOrderAt (verbatim from order_cmd.cpp:357-366, that TU not compiled). The
- * autonomous-bus re-path (r1_scene.cpp) calls v->GetOrder(leg) which forwards here to fetch the
- * Nth order in the chain. Real walk over `first`/`next` — needed for order-driven navigation. */
-Order *OrderList::GetOrderAt(int index) const
-{
-	if (index < 0) return nullptr;
-	Order *order = this->first;
-	while (order != nullptr && index-- > 0) {
-		order = order->next;
-	}
-	return order;
 }
 
 /* ---- Validation hook: how many real Orders currently live in the pool. ---- */

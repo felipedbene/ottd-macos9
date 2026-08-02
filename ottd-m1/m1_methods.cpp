@@ -18,5 +18,8 @@
 #include "vehicle_base.h"
 #include "linkgraph/linkgraph.h"
 
+#ifndef R1_REAL_VEHICLE_STACK
+/* Superseded by the real TU (vehicle.cpp). */
 void Vehicle::ShiftDates(int) {}
+#endif
 void LinkGraph::ShiftDates(int) {}

@@ -33,6 +33,11 @@
 /* The REAL Vehicle pool — replaces the fake `char _vehicle_pool[4096]` deadpool (guarded
  * out of m1_deadpools.c under R1_MERGE). PoolBase (compiled in core/pool_func.cpp) registers
  * it. FreeItem was removed from m1_road_stubs.cpp so this full macro doesn't duplicate it. */
+#ifndef R1_REAL_VEHICLE_STACK
+/* SUPERSEDED. vehicle.cpp now owns _vehicle_pool, the Vehicle ctor and
+ * PreDestructor; roadveh_cmd.cpp owns every RoadVehicle:: method below. These
+ * hand-rolled versions existed only because those two TUs were believed
+ * unlinkable (the YAPF cascade) -- see the file comment above. */
 VehiclePool _vehicle_pool("Vehicle");
 INSTANTIATE_POOL_METHODS(Vehicle)
 
@@ -74,6 +79,7 @@ TileIndex RoadVehicle::GetOrderStationLocation(StationID) { return INVALID_TILE;
 bool      RoadVehicle::FindClosestDepot(TileIndex *, DestinationID *, bool *) { return false; }
 int       RoadVehicle::GetCurrentMaxSpeed() const { return 0; }
 void      RoadVehicle::SetDestTile(TileIndex tile) { this->dest_tile = tile; }
+#endif  /* !R1_REAL_VEHICLE_STACK */
 
 /* GroundVehicle virtual override present in the RoadVehicle vtable (out-of-line; real one
  * at ground_vehicle.cpp, explicit-instantiated there — that TU is not compiled). */

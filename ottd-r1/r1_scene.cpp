@@ -889,6 +889,13 @@ static void r1_update_vehicle(R1Bus &b)
     Vehicle *v = b.v;
     v->x_pos = wx; v->y_pos = wy; v->z_pos = wz; v->direction = dir;
     v->sprite_cache.sprite_seq.Set((SpriteID)(0xCD4 + dir));
+#ifdef R1_REAL_VEHICLE_STACK
+    /* The real ViewportAddVehicles draws from _vehicle_viewport_hash, not from a
+     * pool walk, so a hand-moved vehicle is invisible until it re-publishes itself.
+     * Sprite first: UpdateViewport derives coord from the sprite bounds. */
+    v->UpdatePosition();
+    v->UpdateViewport(true);
+#endif
 }
 
 // ===== R1-104: a real TRAIN on real MP_RAILWAY track =====
@@ -941,6 +948,10 @@ static void r1_train_move(int mult)
     if (t.v == nullptr) { t.v = (Vehicle *)r1_make_train((uint)a, wx, wy, wz, (int)dir); return; }
     t.v->x_pos = wx; t.v->y_pos = wy; t.v->z_pos = wz; t.v->direction = dir;
     t.v->sprite_cache.sprite_seq.Set((SpriteID)(0x0B59 + dir));
+#ifdef R1_REAL_VEHICLE_STACK
+    t.v->UpdatePosition();
+    t.v->UpdateViewport(true);
+#endif
     // Dirty the train's projected area (+ generous box) so it repaints each move.
     Point p = RemapCoords(wx, wy, wz);
     MarkAllViewportsDirty(p.x - 32, p.y - 64, p.x + 32, p.y + 32);
@@ -948,6 +959,14 @@ static void r1_train_move(int mult)
 
 // R1-76: draw the REAL pooled vehicles. Called inside the real ViewportDoDraw, so each
 // vehicle's sprite is sorted correctly over the terrain/road by AddSortableSpriteToDraw.
+#ifndef R1_REAL_VEHICLE_STACK
+/* SUPERSEDED by the real ViewportAddVehicles in vehicle.cpp.
+ *
+ * This one walked the whole pool and drew from x_pos/y_pos directly, which worked
+ * precisely because nothing else maintained vehicle state. The real one draws from
+ * _vehicle_viewport_hash, so any vehicle we move by hand must now publish itself
+ * into that hash -- see the UpdatePosition/UpdateViewport calls in r1_bus_move and
+ * r1_train_move below. In exchange we get the game's own sprite sorting/bounds. */
 void ViewportAddVehicles(DrawPixelInfo *)
 {
     for (const Vehicle *v : Vehicle::Iterate()) {
@@ -956,6 +975,7 @@ void ViewportAddVehicles(DrawPixelInfo *)
             v->x_pos, v->y_pos, 4, 4, 6, v->z_pos, false, 0, 0, 0);
     }
 }
+#endif  /* !R1_REAL_VEHICLE_STACK */
 
 // Screen-centre of the bus for a given viewport (false if no route).
 static int g_pbx0 = 0, g_pby0 = 0, g_pbx1 = 0, g_pby1 = 0;  // previous bus screen rect

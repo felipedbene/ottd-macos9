@@ -172,8 +172,11 @@ void StationCargoList::Append(CargoPacket *cp, StationID next)
  * m1_deadpools.c under R1_MERGE). _roadstop_pool is brand-new (no compiled TU referenced it). */
 StationPool _station_pool("Station");
 INSTANTIATE_POOL_METHODS(Station)
+#ifndef R1_REAL_VEHICLE_STACK
+/* Superseded by the real TU (roadstop.cpp). */
 RoadStopPool _roadstop_pool("RoadStop");
 INSTANTIATE_POOL_METHODS(RoadStop)
+#endif
 /* R1 rung-b: real CargoPacket pool (brand-new symbol; cargopacket.cpp is not compiled, so no ODR
  * clash). ~CargoPacket is inline-empty in the header, so CleanPool is safe to instantiate. */
 CargoPacketPool _cargopacket_pool("CargoPacket");
@@ -204,7 +207,10 @@ Station::~Station() {}
 BaseStation::~BaseStation() {}
 /* static */ void BaseStation::PostDestructor(size_t) {}
 void BaseStation::FillCachedName() const {}
+#ifndef R1_REAL_VEHICLE_STACK
+/* Superseded by the real TU (roadstop.cpp). */
 RoadStop::~RoadStop() {}
+#endif
 
 /* ------- Station out-of-line virtuals -> emits the vtable + typeinfo -------
  * Stub bodies (never on the live path: no MP_STATION tile, no rail platform, no NewGRF). */

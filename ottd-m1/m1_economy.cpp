@@ -135,7 +135,12 @@ void SubtractMoneyFromCompany(const CommandCost &cost)
  * annual loan interest + a small daily property upkeep per company, plus a per-bus running cost.
  * The finance window's Operating Expenses (Loan Interest / Infrastructure / Road Vehicles) now
  * populate, and the graphs' cur_economy.expenses accumulates. Income still exceeds it (profitable). */
-void EnginesDailyLoop()
+/* RENAMED from EnginesDailyLoop: engine.cpp now owns that name (engine availability
+ * and preview handling). This body is R1's own daily expense charge and must still
+ * run every game-day -- build.sh seds date.cpp to call it right after the real
+ * EnginesDailyLoop, which is the only caller. Losing it would silently flatten the
+ * finance window and break the fin_invariant gate (money == 100000 - sum(expenses)). */
+extern "C" void r1_daily_expenses()
 {
 	CompanyID save = _current_company;
 	for (const Company *c : Company::Iterate()) {
