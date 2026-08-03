@@ -1,5 +1,7 @@
 # Handoff: the ~130-line netlog freeze (telemetry dies at tick 512, app at tick 768)
 
+<!-- agent: started 2026-08-02; audited netlog.c + statsd.c; implementing A (file tee + NETSTAT) and B1/B2 (OTLook drain loop); NOT running QEMU harness -->
+
 Task brief for an external coding agent. Everything you deliver is verifiable by
 **compiling**; the runtime validation loop (QEMU slot pool) is run on our side. Do not
 run the test harness.
@@ -115,3 +117,77 @@ must still be exported, plus your new getter.
 - The exact diff to netlog.c / statsd.c
 - Confirmation both .o files were rebuilt (nm output for the new symbols)
 - Anything that contradicts this brief
+
+<!-- agent: compile-only verification done; both .o rebuilt + copied to b1/b2; writing final report -->
+
+## Agent report (2026-08-02)
+
+### Root cause (static)
+
+**Stage 1 (sink dies ~line 130 / tick 512):** `sd_send_to` only cleared `T_UDERR`
+once on `kOTLookErr` (`statsd.c` old path). A sync non-blocking UDP endpoint that
+leaves **any other** look queued — especially `T_GODATA` after `kOTFlowErr`, or
+stray `T_DATA` — returns `kOTLookErr` on every later send. That matches
+"datagrams stop arriving after a fixed count while the game keeps running."
+
+**Stage 2 (hard freeze ~tick 768):** not fully provable compile-only. Two
+plausible contributors, both addressed:
+1. Enough ignored OT looks can wedge the provider (same bug as stage 1, delayed).
+2. `NETLOG_THROTTLE` busy-wait (~1 TickCount per line ≈ 0.5 s/beat at ~35
+   lines/beat) starves the cooperative Mac event loop. Disabled now that drain
+   replaces it.
+
+**Ruled out:** OT per-send memory leak — `TUnitData` is stack-local; buffers are
+caller-owned; no `OTAlloc` in the send path.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `mac-minivnc/mac-cpp-source/statsd.c` | `sd_drain_looks()` loop; drain+retry on `kOTLookErr`; `statsd_stats()` getter (+ no-op branch) |
+| `mac-minivnc/mac-cpp-source/statsd.h` | declare `statsd_stats` |
+| `ottd-b1/netlog.c` | always `file_line` tee; every 32 lines file-only `NETSTAT:`; `NETLOG_THROTTLE 0` |
+| `ottd-b1/build-statsd.sh` | **new** — recipe from brief, copies to b1+b2 |
+| `ottd-b1/{netlog,statsd_ot}.o` + `ottd-b2/` copies | rebuilt prebuilts |
+
+Signatures `ottd_log_init/ottd_log/ottd_log_close/ottd_log_set_tag` unchanged.
+No cmake/build.sh. No Step 4 drag-pan files.
+
+### How verified
+
+```
+bash ottd-b1/build-netlog.sh
+bash ottd-b1/build-statsd.sh
+```
+
+nm `statsd_ot.o` T symbols (five originals + getter):
+```
+T .statsd_close
+T .statsd_fmt
+T .statsd_log
+T .statsd_log_open
+T .statsd_open
+T .statsd_send
+T .statsd_stats
+```
+Also `U .OTRcvUData` (new drain dependency). netlog.o: `U .statsd_stats`.
+b1/b2 copies `cmp`-identical. QEMU harness **not** run (per brief).
+
+### Runtime split (for your side)
+
+After a freeze, read the guest file next to the app:
+- File keeps growing past ~130 + `NETSTAT` lines → stage 1 was send-path drop;
+  stage 2 elsewhere (or OT wedge after silent fails).
+- File also stops ~130 → freeze is inside/behind `ottd_log`.
+- `NETSTAT fail` climbing / `lasterr=-3158` (`kOTLookErr`) / `-3161` (`kOTFlowErr`)
+  confirms the OT look/flow theory.
+
+### Contradicts brief?
+
+Nothing material. Notes:
+- Stage 2 hard-freeze identity with stage 1 is still a hypothesis until the file
+  tee is read post-freeze on hardware/QEMU.
+- Throttle was **disabled** (brief said "consider"); drain is the intended
+  replacement.
+- Brief said "`#ifdef STATSD_OT`"; source actually uses `#if STATSD_OT` —
+  structure left intact, no-op branch updated.

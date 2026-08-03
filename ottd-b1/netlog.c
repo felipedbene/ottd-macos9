@@ -33,15 +33,17 @@
 #include <stdarg.h>
 #include <string.h>
 
-/* Debug throttle: OT non-blocking UDP drops under burst, so yield ~1 tick after
- * each send to let the stack drain -> every line reliably reaches the sink.
- * Bring-up only; drop for production fire-and-forget. */
-#define NETLOG_THROTTLE 1
+/* Debug throttle: OT non-blocking UDP used to drop under burst, so bring-up
+ * yielded ~1 tick after each send. That cost ~0.5 s of busy-wait per beat at
+ * ~35 lines/beat and starved the cooperative event loop. With sd_drain_looks()
+ * clearing T_UDERR/T_GODATA/T_DATA, the spin is no longer needed. */
+#define NETLOG_THROTTLE 0
 
 /* statsd.c (compiled alongside, also against the OT headers) */
 extern OSErr statsd_open(const char *ip, unsigned short port);
 extern OSErr statsd_log_open(const char *ip, unsigned short port);
 extern void  statsd_log(const char *buf, int len);
+extern void  statsd_stats(long *ok, long *fail, long *err);
 extern void  statsd_close(void);
 
 /* k8s log-sink (MetalLB VIP). This vintage Mac already reaches it via MiniVNC. */
@@ -50,6 +52,7 @@ extern void  statsd_close(void);
 
 static char g_path[256];
 static int  g_net = 0;   /* 1 once the UDP endpoint is open */
+static unsigned long g_lines = 0;  /* lines through ottd_log (for NETSTAT cadence) */
 
 /* Run tag stamped on every line as "[<tag>] ".
  *
@@ -131,14 +134,25 @@ void ottd_log(const char *fmt, ...)
     va_end(ap);
     if (n > (int)sizeof(buf)) n = (int)sizeof(buf);
 
-    /* UDP confirmed working -> pure fire-and-forget (no per-line File Manager churn). */
+    /* Always tee to the guest-disk file so a dead UDP sink still leaves a
+     * postmortem. UDP alone is how we lost visibility into the ~tick-512 freeze. */
+    file_line(buf, n);
     if (g_net) {
         statsd_log(buf, n);
 #if NETLOG_THROTTLE
         { unsigned long t = TickCount(); while (TickCount() == t) { } }  /* yield ~1 tick so OT drains */
 #endif
-    } else {
-        file_line(buf, n);          /* only fall back to file if OT never came up */
+    }
+
+    /* Every 32 lines, file-only counters — survives when the sink is the dying channel. */
+    g_lines++;
+    if ((g_lines & 31ul) == 0) {
+        long ok = 0, fail = 0, err = 0;
+        char m[96];
+        int mn;
+        statsd_stats(&ok, &fail, &err);
+        mn = (int)sprintf(m, "NETSTAT: ok=%ld fail=%ld lasterr=%ld", ok, fail, err);
+        file_line(m, mn);
     }
 }
 
