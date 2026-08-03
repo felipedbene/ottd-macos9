@@ -1294,9 +1294,10 @@ struct R1MainWindow : Window {
         this->viewport->scrollpos_y += ScaleByZoom(delta.y, this->viewport->zoom);
         this->viewport->dest_scrollpos_x = this->viewport->scrollpos_x;
         this->viewport->dest_scrollpos_y = this->viewport->scrollpos_y;
-        // Pan redraw: DoSetViewportPosition (build.sh patch) calls macsys_scroll — windowport
-        // CopyBits + RAM memmove — then only edge strips RedrawScreenRect. This override just
-        // moves scrollpos (map-edge clamp is handled inside SetViewportPosition).
+        // R1-98: the actual anti-tearing fix is in viewport.cpp (build.sh patch) — DoSetViewportPosition
+        // is forced to FULL-redraw instead of GfxScroll's in-place _screen memmove (which tears on the
+        // Mac's single QuickDraw buffer, vertical especially). That handles the map-edge clamp case my
+        // earlier virtual_* sync could not, so this override just moves scrollpos.
     }
 
     // R1-105 INTERACTIVE: a plain LEFT-click applies a tile-type-keyed tool (Ctrl+drag still pans —

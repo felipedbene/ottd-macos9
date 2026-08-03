@@ -60,13 +60,6 @@ unsigned char *macsys_fb(int *pitch);
 /* CopyBits one framebuffer rect to the window. */
 void macsys_blit(int left, int top, int width, int height);
 
-/* Phase 2 Step 4 — pan scroll: CopyBits the window port onto itself (VRAM→VRAM when
- * the window lives on a hardware GD), then memmove the matching region in the RAM
- * framebuffer so compositing stays coherent. dx/dy use OpenTTD GfxScroll semantics
- * (content moves by (dx,dy); newly exposed edges are caller's job via RedrawScreenRect).
- * Returns 1 on success, 0 if the caller should full-redraw instead. */
-int macsys_scroll(int left, int top, int width, int height, int dx, int dy);
-
 /* Install palette entries [first, first+count): rgb = count*3 bytes.
  * SetEntries on an 8-bit CLUT screen (palette animation is free there),
  * always updates the PixMap CTab so CopyBits maps correctly at any depth. */
