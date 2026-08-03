@@ -111,6 +111,21 @@ bool DoZoomInOutWindow(ZoomStateChange how, Window *w)
 	MarkWholeScreenDirty();
 	return true;
 }
+
+/* Wheel-zoom toward cursor (main_gui.cpp isn't linked; toolbar calls this). */
+void ZoomInOrOutToCursorWindow(bool in, Window *w)
+{
+	if (w == nullptr || w->viewport == nullptr) return;
+	Viewport *vp = w->viewport;
+	if ((in && vp->zoom <= _settings_client.gui.zoom_min) ||
+			(!in && vp->zoom >= _settings_client.gui.zoom_max)) return;
+	Point pt = GetTileZoomCenterWindow(in, w);
+	if (pt.x != -1) {
+		ScrollWindowTo(pt.x, pt.y, -1, w, true);
+		DoZoomInOutWindow(in ? ZOOM_IN : ZOOM_OUT, w);
+	}
+}
+
 bool ScrollMainWindowTo(int, int, int, bool) { return false; }
 
 /* ---- window-chrome drawing / tooltips ---- */
