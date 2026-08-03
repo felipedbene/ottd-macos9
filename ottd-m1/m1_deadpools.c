@@ -82,13 +82,17 @@ char _sorted_cargo_specs[64]   = {0};   /* std::vector (zeroed == empty) */
 char _valid_searchpaths[64]    = {0};   /* std::vector (zeroed == empty) */
 const char _openttd_revision[] = "13.4";
 #endif
+#ifndef R1_MERGE  /* real RoadTypeInfo _roadtypes[]/_roadtypes_type live in road_cmd.cpp */
 char _roadtypes[65536]           = {0};   /* RoadTypeInfo[ROADTYPE_END] */
 char _roadtypes_type[64]         = {0};
+#endif
 char _transparency_opt[64]       = {0};
 char _invisibility_opt[64]       = {0};
 char _current_company[16]        = {0};   /* CompanyID (byte); build 7 sets this to OWNER_DEITY before CmdTownGrowthRate */
 char _local_company[16]          = {0};
+#ifndef R1_REAL_TERRAIN  /* real bool _generating_world lives in genworld.cpp once wired */
 char _generating_world[16]       = {0};   /* bool; false */
+#endif
 
 /* M1 build 8: landscape.cpp defines the _tile_type_procs[] master dispatch
  * table, which takes the address of every tile type's TileTypeProcs struct.
@@ -149,7 +153,9 @@ char _railtypes[131072]            = {0};   /* RailtypeInfo[RAILTYPE_END] */
  * Function stubs live in m1_viewport_stubs.cpp. Sized >= sizeof the real type. */
 char _sign_pool[8192]                    = {0};   /* SignPool: empty (Sign::Iterate yields nothing) */
 char _town_local_authority_kdtree[4096]  = {0};   /* TownKdtree: zero items */
+#ifndef R1_MERGE  /* real SpecialMouseMode _special_mouse_mode lives in window.cpp */
 char _special_mouse_mode[16]             = {0};   /* SpecialMouseMode (WSM_NONE) */
+#endif
 char _debug_misc_level[16]               = {0};   /* int */
 char _network_own_client_id[16]          = {0};   /* ClientID (uint32) */
 
@@ -171,7 +177,9 @@ char _ZTI11NWidgetCore[64]               = {0};   /* typeinfo for NWidgetCore */
  * `extern` declarations) so no cast is needed; all safe as zero. Function stubs
  * live in m1_window_stubs.cpp. */
 int          _caret_timer      = 0;   /* int  (window.cpp: extern int _caret_timer) */
+#ifndef R1_MERGE  /* real uint _toolbar_width lives in toolbar_gui.cpp (compiled in R1) */
 unsigned int _toolbar_width    = 0;   /* uint (toolbar_gui.cpp: uint _toolbar_width) */
+#endif
 char         _network_dedicated = 0;  /* bool (network.h: extern bool _network_dedicated) */
 
 /* R1 toolbar-merge: the real toolbar_gui.cpp (main toolbar) is compiled. Its
