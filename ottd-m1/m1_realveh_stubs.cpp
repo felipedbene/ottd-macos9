@@ -107,9 +107,18 @@ Trackdir NPFRoadVehicleChooseTrack(const RoadVehicle *, TileIndex, DiagDirection
 	return INVALID_TRACKDIR;
 }
 
-/* No depots in R1 (m1_depot.cpp is a later rung), so "no depot found". */
-FindDepotData YapfRoadVehicleFindNearestDepot(const RoadVehicle *, int) { return FindDepotData(); }
-FindDepotData NPFRoadVehicleFindNearestDepot(const RoadVehicle *, int) { return FindDepotData(); }
+/* Depot rung: m1_depot.cpp owns the pool + r1_find_nearest_road_depot (Manhattan
+ * over Depot::Iterate). Real YAPF/NPF are not linked; FindClosestDepot in
+ * roadveh_cmd.cpp reaches us through these two names. */
+FindDepotData r1_find_nearest_road_depot(const Vehicle *v, int max_distance);
+FindDepotData YapfRoadVehicleFindNearestDepot(const RoadVehicle *v, int max_distance)
+{
+	return r1_find_nearest_road_depot(v, max_distance);
+}
+FindDepotData NPFRoadVehicleFindNearestDepot(const RoadVehicle *v, int max_distance)
+{
+	return r1_find_nearest_road_depot(v, max_distance);
+}
 
 /* ---------------------------------------------------------------------------
  * Engine / property lookups. No NewGRF is loaded beyond the base graphics, so
