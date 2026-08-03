@@ -61,6 +61,7 @@
  */
 
 #include "stdafx.h"
+extern "C" int macsys_scroll(int, int, int, int, int, int); /* Step4: ottd-b2/macsys.h */
 #include "landscape.h"
 #include "viewport_func.h"
 #include "station_base.h"
@@ -309,13 +310,13 @@ static void DoSetViewportPosition(Window::IteratorToFront it, int left, int top,
 		int xo = _vp_move_offs.x;
 		int yo = _vp_move_offs.y;
 
-		if (true) { /* R1: always full-redraw, no GfxScroll tearing */
+		if (abs(xo) >= width || abs(yo) >= height) {
 			/* fully_outside */
 			RedrawScreenRect(left, top, left + width, top + height);
 			return;
 		}
 
-		GfxScroll(left, top, width, height, xo, yo);
+		if (!macsys_scroll(left, top, width, height, xo, yo)) { RedrawScreenRect(left, top, left + width, top + height); return; } /* Step4: windowport CopyBits scroll */
 
 		if (xo > 0) {
 			RedrawScreenRect(left, top, xo + left, top + height);

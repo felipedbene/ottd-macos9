@@ -258,6 +258,10 @@ int macsys_scroll(int left, int top, int width, int height, int dx, int dy)
     Rect src, dst;
     int adx = dx < 0 ? -dx : dx;
     int ady = dy < 0 ? -dy : dy;
+    /* Overlap of src and dst inside the scroll rect — same shrink as scroll_fb /
+     * Blitter_8bppBase::ScrollBuffer. Full-rect CopyBits to an offset dst overshoots
+     * into clipped-out rows (toolbar/cash bar) and adjacent DoSetViewportPosition strips. */
+    int dleft, dtop, dwidth, dheight;
 
     if (g_win == NULL || g_fb == NULL) return 0;
     if (dx == 0 && dy == 0) return 1;
@@ -268,14 +272,33 @@ int macsys_scroll(int left, int top, int width, int height, int dx, int dy)
     if (width <= 0 || height <= 0) return 0;
     if (adx >= width || ady >= height) return 0;
 
-    /* 1) Windowport self-CopyBits: when the CWindow's PixMap lives in device VRAM
-     * (normal for an on-screen colour window), this is the Rage's VRAM→VRAM BitBlt.
-     * Same &portBits convention as macsys_blit (works for CGrafPort). */
+    dleft = left;
+    dtop = top;
+    dwidth = width;
+    dheight = height;
+    if (dy > 0) {
+        dtop += dy;
+        dheight -= dy;
+    } else {
+        dheight += dy;
+    }
+    if (dx >= 0) {
+        dleft += dx;
+        dwidth -= dx;
+    } else {
+        dwidth += dx;
+    }
+    if (dwidth <= 0 || dheight <= 0) return 0;
+
+    /* 1) Windowport self-CopyBits of the retained overlap only (VRAM→VRAM when the
+     * CWindow PixMap lives on a hardware GD). Same &portBits convention as macsys_blit. */
     SetPort(g_win);
-    SetRect(&src, (short)left, (short)top, (short)(left + width), (short)(top + height));
+    SetRect(&src,
+            (short)(dleft - dx), (short)(dtop - dy),
+            (short)(dleft - dx + dwidth), (short)(dtop - dy + dheight));
     SetRect(&dst,
-            (short)(left + dx), (short)(top + dy),
-            (short)(left + width + dx), (short)(top + height + dy));
+            (short)dleft, (short)dtop,
+            (short)(dleft + dwidth), (short)(dtop + dheight));
     CopyBits(&g_win->portBits, &g_win->portBits, &src, &dst, srcCopy, NULL);
 
     /* 2) Keep the RAM compositing buffer in lockstep so edge RedrawScreenRect /

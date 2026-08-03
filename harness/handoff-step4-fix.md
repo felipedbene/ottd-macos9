@@ -4,6 +4,11 @@ Task brief for an external coding agent. Everything here is verifiable by **comp
 the drag-pan validation runs on our side (QEMU slot pool + QMP input injection). Do not
 run the test harness.
 
+<!-- agent: 2026-08-02 — Starting. Read handoff + notes-step4-drag-verdict.md. On main (post-revert). Branch pr/graphics-step4-scroll exists locally+remote. Next: inspect branch sed/macsys_scroll vs upstream DoSetViewportPosition post-GfxScroll path, then rebase onto main and fix. -->
+<!-- agent: Diagnosis vs brief. (1) Brief's prime suspect is WRONG on the success path: sed is `if (!macsys_scroll(...)) { RedrawScreenRect(...); return; }` — early-return only on FAILURE; on success the edge-strip RedrawScreenRects still run. (2) Upstream DoSetViewportPosition ALREADY clips scroll rects around overlapping front windows before GfxScroll — so "clip" shape is already there. (3) Real bug: macsys_scroll CopyBits used full-rect src→offset dst, so dst OVERSHOOTS the clipped rect into toolbar/cash-bar/adjacent strips; scroll_fb correctly stayed in-bounds (Blitter_8bppBase::ScrollBuffer geometry). Fix chosen: clip CopyBits to the retained overlap (shape closer to upstream ScrollBuffer than blit-then-repair). -->
+<!-- agent: Rebase note: `git rebase main` dropped the feature commit (65141f4 is already in main's merge history), so cherry-picked 65141f4 onto main tip instead. Applied overlap-only CopyBits fix to ottd-b2 + ottd-r1 macclassic_sys.c. Next: verify sed fires on pristine 13.4 viewport.cpp; compile/link. -->
+
+
 ## Context
 
 `pr/graphics-step4-scroll` replaced R1-98's full-redraw `DoSetViewportPosition` with
@@ -92,3 +97,49 @@ pass (it will — it never pans; the real gate is the drag).
 - The diff, and which shape (clip vs blit-then-repair) you chose and why
 - Confirmation the sed still fires on pristine 13.4 source
 - Anything that contradicts this brief or the verdict notes
+
+<!-- agent: DONE 2026-08-02.
+
+### Mechanism confirmed
+Brief's "early return skips post-GfxScroll work" does **not** pan out on the success path.
+build.sh sed is:
+  if (!macsys_scroll(...)) { RedrawScreenRect(full); return; }
+On success, execution continues into the same xo/yo edge-strip RedrawScreenRects as upstream.
+Upstream DoSetViewportPosition already clips scroll rects around front windows before the
+scroll call — toolbar/cash-bar rows are not in the scroll rects.
+
+Root cause: macsys_scroll CopyBits used full-rect src → offset dst, so QuickDraw wrote
+**outside** the clipped scroll rect (into toolbar / cash bar / adjacent subdivided strips).
+scroll_fb already used Blitter_8bppBase::ScrollBuffer geometry (in-bounds only). VRAM and
+RAM diverged; toolbar/cash bar never SetDirty themselves → permanent garble. Water shards
+are the same overshoot between strips around Towns (Towns recovers via its own repaint).
+
+### Shape chosen
+Clip CopyBits to the retained overlap (same shrink as scroll_fb) — not blit-then-repair.
+Closest to upstream ScrollBuffer; window clipping already exists in DoSetViewportPosition.
+
+### Files changed
+- ottd-b2/macclassic_sys.c — macsys_scroll overlap-only CopyBits
+- ottd-r1/macclassic_sys.c — same (kept in sync; r1 keeps its longer comments)
+- harness/handoff-step4-fix.md — progress + this report
+- Branch: cherry-picked original feat commit onto main tip (plain rebase dropped it —
+  65141f4 is already in main's merge history). Fix commit on top.
+
+### Sed confirmation
+Forced rebuild of viewport_patched.cpp from pristine openttd-13.4/src/viewport.cpp:
+  line 64: extern "C" int macsys_scroll(...);
+  line 319: if (!macsys_scroll(...)) { RedrawScreenRect(...); return; }
+  GfxScroll call site gone; nm viewport.o → U .macsys_scroll; linked binary → T .macsys_scroll
+
+### Verified
+- bash ottd-r1/build.sh compile (forced viewport rebuild)
+- cmake + make ottdr1_APPL (macclassic_sys.c.obj + link) → ottdr1.bin
+- standalone compile of ottd-b2/macclassic_sys.c OK
+- Did NOT run QEMU harness / drag injection (per brief)
+
+### Contradicts brief / verdict notes
+1. Early-return-on-success hypothesis is false (return only on macsys_scroll failure).
+2. "Clip scroll rect minus windows" is already done upstream; the missing piece was
+   CopyBits not respecting that clip.
+3. Edge-strip math itself was not wrong; shards were overshoot into non-scrolled regions.
+-->
