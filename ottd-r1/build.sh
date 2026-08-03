@@ -18,7 +18,11 @@ B2=/Users/felipe/ottd-macos9/ottd-b2
 R1=/Users/felipe/ottd-macos9/ottd-r1
 TCLIB=/Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/lib
 
-CXXFLAGS=(-std=c++17 -DNO_THREADS -DTTD_ENDIAN=TTD_BIG_ENDIAN -DR1_MERGE -DR1_STRINGS -DR1_REAL_VEHICLE_STACK -DNDEBUG -include "$COMPAT/libc_compat.h" -Os)
+# -frandom-seed=r1: without it g++ salts per-compile random bits into generated
+# symbol names (measured: ground_vehicle.o's _GLOBAL__F_..._0x<hash> differed on
+# every rebuild), so "same tree -> same binary" never held. A fixed seed is safe
+# here: every seeded name already embeds the TU's own path, so TUs can't collide.
+CXXFLAGS=(-std=c++17 -DNO_THREADS -DTTD_ENDIAN=TTD_BIG_ENDIAN -DR1_MERGE -DR1_STRINGS -DR1_REAL_VEHICLE_STACK -DNDEBUG -include "$COMPAT/libc_compat.h" -Os -frandom-seed=r1)
 INCS=(-I"$COMPAT" -I"$OTTD/src" -I"$OTTD/src/3rdparty" -I"$OTTD/src/3rdparty/squirrel/include" -I"$OTTD/src/script/api" -I"$GEN" -I"$GEN/script/api")
 
 # --- mtime gating -----------------------------------------------------------

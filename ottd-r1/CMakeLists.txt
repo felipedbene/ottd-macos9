@@ -19,7 +19,12 @@ file(GLOB R1_ENGINE_OBJS ${CMAKE_CURRENT_SOURCE_DIR}/obj/*.o)
 add_application(ottdr1 r1main.c macclassic_sys.c macdir.c)
 set_target_properties(ottdr1 PROPERTIES LINKER_LANGUAGE CXX)
 target_include_directories(ottdr1 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${B2})
-target_link_options(ottdr1 PRIVATE "LINKER:--gc-sections")
+# -save-temps makes collect2 name its ctor-table scratch file after the output
+# (ottdr1.xcoff.cdtor.c) instead of a random /var/folders/.../ccXXXXXX.cdtor.c;
+# that random name used to land in the xcoff symtab and broke build determinism
+# (measured: 12 of the 27 differing bytes between two clean builds). Side effect:
+# ottdr1.xcoff.cdtor.{c,o} are left in the build dir — harmless scratch.
+target_link_options(ottdr1 PRIVATE -save-temps "LINKER:--gc-sections")
 target_link_libraries(ottdr1
     # Mac-side render/video driver + scene (reused prebuilt from B2).
     # b2_scene.o replaced by obj/r1_scene.o (from the R1_ENGINE_OBJS glob): draws
