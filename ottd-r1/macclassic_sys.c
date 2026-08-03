@@ -165,6 +165,28 @@ int macsys_create_window(int w, int h, const char *title)
         if (depth == 8) ottd_log("macsys: screen depth=8bpp (OK: hw palette anim + cheap present)");
         else            ottd_log("macsys: screen depth=%dbpp (WARN: set session to 256 colours for hw palette + cheap present)", depth);
     }
+
+    /* Phase 2 Step 4 probe: can NewGWorld place an 8bpp buffer in local VRAM?
+     * Multiversal omits useLocalHdwrMem; value is QDOffscreen bit 5 (UI 3.4).
+     * We do NOT composite into VRAM (uncached writes crush the G3) — compositing
+     * stays in the NewPtr fb; pan uses windowport CopyBits (see macsys_scroll).
+     * A retained offscreen VRAM GWorld / DrawSprocket back buffer is still TODO. */
+    {
+        GWorldPtr gw = NULL;
+        Rect br;
+        QDErr err;
+        /* useLocalHdwrMem = 1<<5 — not in Multiverse.h's pixPurge enum */
+        const GWorldFlags vram_local = (GWorldFlags)(1L << 5);
+        SetRect(&br, 0, 0, (short)w, (short)h);
+        err = NewGWorld(&gw, 8, &br, g_ctab, GetMainDevice(), vram_local);
+        if (err == noErr && gw != NULL) {
+            ottd_log("macsys: VRAM GWorld probe OK (%dx%d 8bpp, ~%ld KB) — pan uses windowport CopyBits; offscreen VRAM backbuffer TODO",
+                     w, h, (rowBytes * (long)h) / 1024L);
+            DisposeGWorld(gw);
+        } else {
+            ottd_log("macsys: VRAM GWorld probe failed err=%d — pan still tries windowport CopyBits", (int)err);
+        }
+    }
     return 1;
 }
 
@@ -195,6 +217,71 @@ void macsys_blit(int left, int top, int width, int height)
      * QuickDraw (~35 ns/px, scales linearly with area) — NOT accelerated by the ATI Rage.
      * See docs/graphics-acceleration-clamshell.md. */
     CopyBits((BitMap *)&g_pm, &g_win->portBits, &r, &r, srcCopy, NULL);
+}
+
+/* Scroll RAM fb with the same geometry as Blitter_8bppBase::ScrollBuffer. */
+static void scroll_fb(int left, int top, int width, int height, int dx, int dy)
+{
+    unsigned char *video = g_fb;
+    int pitch = g_pitch;
+    const unsigned char *src;
+    unsigned char *dst;
+    int h;
+
+    if (dy > 0) {
+        dst = video + left + (top + height - 1) * pitch;
+        src = dst - dy * pitch;
+        height -= dy;
+        if (dx >= 0) { dst += dx; width -= dx; }
+        else         { src -= dx; width += dx; }
+        for (h = height; h > 0; h--) {
+            memcpy(dst, src, (size_t)width);
+            src -= pitch;
+            dst -= pitch;
+        }
+    } else {
+        dst = video + left + top * pitch;
+        src = dst - dy * pitch;
+        height += dy;
+        if (dx >= 0) { dst += dx; width -= dx; }
+        else         { src -= dx; width += dx; }
+        for (h = height; h > 0; h--) {
+            memmove(dst, src, (size_t)width);
+            src += pitch;
+            dst += pitch;
+        }
+    }
+}
+
+int macsys_scroll(int left, int top, int width, int height, int dx, int dy)
+{
+    Rect src, dst;
+    int adx = dx < 0 ? -dx : dx;
+    int ady = dy < 0 ? -dy : dy;
+
+    if (g_win == NULL || g_fb == NULL) return 0;
+    if (dx == 0 && dy == 0) return 1;
+    if (left < 0) { width += left; left = 0; }
+    if (top < 0) { height += top; top = 0; }
+    if (left + width > g_w) width = g_w - left;
+    if (top + height > g_h) height = g_h - top;
+    if (width <= 0 || height <= 0) return 0;
+    if (adx >= width || ady >= height) return 0;
+
+    /* 1) Windowport self-CopyBits: when the CWindow's PixMap lives in device VRAM
+     * (normal for an on-screen colour window), this is the Rage's VRAM→VRAM BitBlt.
+     * Same &portBits convention as macsys_blit (works for CGrafPort). */
+    SetPort(g_win);
+    SetRect(&src, (short)left, (short)top, (short)(left + width), (short)(top + height));
+    SetRect(&dst,
+            (short)(left + dx), (short)(top + dy),
+            (short)(left + width + dx), (short)(top + height + dy));
+    CopyBits(&g_win->portBits, &g_win->portBits, &src, &dst, srcCopy, NULL);
+
+    /* 2) Keep the RAM compositing buffer in lockstep so edge RedrawScreenRect /
+     * later blits see the scrolled retained region (not the pre-pan pixels). */
+    scroll_fb(left, top, width, height, dx, dy);
+    return 1;
 }
 
 void macsys_set_palette(int first, int count, const unsigned char *rgb)

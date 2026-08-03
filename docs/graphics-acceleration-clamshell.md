@@ -276,9 +276,22 @@ A single stray whole-screen mark per event is invisible in a frame-time *average
 reads as a periodic hitch to the eye.
 
 ## Staged backlog (next batches, reward-ordered)
-- **Step 4 — hardware scroll-blit on pan** (the one real GPU offload): move the
-  framebuffer into an accelerated GWorld / DrawSprocket back buffer and use a
-  VRAM→VRAM `CopyBits` for the retained region during pans. Bigger effort, real
-  payoff *only while panning*. Needs the exact clamshell VRAM budget confirmed.
+- **Step 4 — hardware scroll-blit on pan** (PARTIAL): landed an incremental slice.
+  - `macsys_scroll` (`ottd-r1/macclassic_sys.c`, mirrored in b2): windowport
+    self-`CopyBits` (VRAM→VRAM when the CWindow PixMap is on a hardware GD) +
+    RAM fb memmove matching `ScrollBuffer` geometry; returns 0 → caller full-redraws.
+  - Viewport pan path (`build.sh` patch): `GfxScroll` replaced by `macsys_scroll`;
+    only newly-exposed edge strips go through `RedrawScreenRect` (no more
+    `MakeDirty` of the retained region that forced a near-full CPU present and
+    tore on OS9). Compositing stays in the `NewPtr` RAM fb — do **not** point
+    `_screen.dst_ptr` at VRAM (uncached writes).
+  - Startup probe: `NewGWorld(..., 1<<5 /*useLocalHdwrMem*/)` logs whether a
+    VRAM-local 8bpp GWorld the size of the window is available (~300 KB at
+    640×480), then disposes it. Offscreen retained VRAM back buffer still unused.
+  - **Still TODO for full Step 4:** keep a live accelerated offscreen GWorld /
+    DrawSprocket back buffer; confirm clamshell VRAM headroom (4 MB Rage Mobility:
+    640×480×8 ≈ 300 KB plus desktop — usually fine, but measure free VRAM /
+    `MaxBlock` under MiniVNC); optional same-depth present from that GWorld.
+    DrawSprocket lib is linkable (`libDrawSprocketLib.a`) but not wired.
 - **Step 5 — CPU blitter / overdraw** (sparser forests, town-name string caching):
   chips at the hot path the GPU can't touch. Marginal, incremental.

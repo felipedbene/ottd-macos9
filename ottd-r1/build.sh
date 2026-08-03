@@ -52,9 +52,10 @@ up_to_date() {
 # m1_station.cpp -- measured: it makes the link surface worse, not better.
 SRC_TUS=(roadveh_cmd.cpp vehicle.cpp engine.cpp order_cmd.cpp roadstop.cpp rail.cpp ground_vehicle.cpp \
          core/pool_func.cpp town_cmd.cpp landscape.cpp clear_cmd.cpp road_cmd.cpp road_map.cpp void_cmd.cpp gfx_layout.cpp fontcache.cpp fontcache/spritefontcache.cpp tree_cmd.cpp townname.cpp widgets/dropdown.cpp toolbar_gui.cpp cargotype.cpp)
-# viewport.cpp is compiled from a PATCHED copy (below): DoSetViewportPosition forced to full-redraw
-# instead of GfxScroll's in-place _screen memmove (which tears the Mac's single QuickDraw buffer on
-# drag-to-pan, vertical especially). Handled separately so the sed patch applies.
+# viewport.cpp is compiled from a PATCHED copy (below): DoSetViewportPosition calls macsys_scroll
+# (windowport CopyBits + RAM memmove) instead of GfxScroll. GfxScroll's MakeDirty(retained) forced a
+# near-full CPU present and tore on OS9's single QuickDraw buffer; macsys_scroll scrolls the window
+# in place (VRAM→VRAM when on a hw GD) and only the exposed edge strips are redrawn.
 # M1 support TUs (shims/stubs/pools) — engine-calibrated, minus the gfx-owned dups.
 # m1_viewport_stubs = no-op window/vehicle/sign surface viewport.cpp links against.
 # m1_text_stubs = the 4 symbols the real font/layout TUs need (config/utf8/glyphs).
@@ -155,13 +156,17 @@ compile_all() {
     queue_cc "$R1/obj/date_patched.cpp" "CXX date" "$GXX" "${CXXFLAGS[@]}" "${INCS[@]}" -c "$R1/obj/date_patched.cpp" -o "$R1/obj/date.o"
   fi
 
-  echo "== viewport.cpp (DoSetViewportPosition forced to full-redraw: no GfxScroll in-place _screen"
-  echo "   memmove, which tears the Mac's single QuickDraw buffer on drag-to-pan, vertical especially) =="
-  if up_to_date "$R1/obj/viewport.o" "$OTTD/src/viewport.cpp"; then
+  echo "== viewport.cpp (Step 4: macsys_scroll windowport CopyBits + edge redraw; no GfxScroll) =="
+  # Also depends on macsys.h (macsys_scroll decl) so a bridge change rebuilds this TU.
+  if up_to_date "$R1/obj/viewport.o" "$OTTD/src/viewport.cpp" "$B2/macsys.h"; then
     echo "  skip (up-to-date) viewport"
   else
-    # Force the 'fully_outside' full-redraw branch for EVERY scroll by making its guard always true.
-    sed 's#if (abs(xo) >= width || abs(yo) >= height) {#if (true) { /* R1: always full-redraw, no GfxScroll tearing */#' \
+    # File-scope extern "C" after stdafx.h (block-scope linkage specs fail under this g++);
+    # replace GfxScroll with macsys_scroll, falling back to full RedrawScreenRect on failure.
+    sed -e '/^#include "stdafx.h"/a\
+extern "C" int macsys_scroll(int, int, int, int, int, int); /* Step4: ottd-b2/macsys.h */
+' \
+        -e 's#GfxScroll(left, top, width, height, xo, yo);#if (!macsys_scroll(left, top, width, height, xo, yo)) { RedrawScreenRect(left, top, left + width, top + height); return; } /* Step4: windowport CopyBits scroll */#' \
         "$OTTD/src/viewport.cpp" > "$R1/obj/viewport_patched.cpp"
     queue_cc "$R1/obj/viewport_patched.cpp" "CXX viewport" "$GXX" "${CXXFLAGS[@]}" "${INCS[@]}" -c "$R1/obj/viewport_patched.cpp" -o "$R1/obj/viewport.o"
   fi
