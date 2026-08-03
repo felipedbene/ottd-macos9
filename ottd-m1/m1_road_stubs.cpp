@@ -36,7 +36,6 @@
 #include "bridge_map.h"
 #include "tunnelbridge.h"
 #include "depot_func.h"
-#include "depot_base.h"
 #include "sound_func.h"
 #include "road_func.h"
 #include "newgrf_roadtype.h"
@@ -48,7 +47,6 @@
 #include "train.h"
 #include "roadveh.h"
 #include "ground_vehicle.hpp"
-#include "core/pool_func.hpp"
 #include "pathfinder/yapf/yapf_cache.h"
 #include "order_base.h"
 #include "cargopacket.h"
@@ -135,7 +133,7 @@ void DrawCommonTileSeqInGUI(int, int, const DrawTileSprites *, int32, uint32, Pa
 Vehicle::~Vehicle() {}
 uint Vehicle::Crash(bool) { return 0; }
 #endif
-Depot::~Depot() {}
+/* Depot::~Depot + DepotPool methods moved to m1_depot.cpp (real _depot_pool). */
 
 /* R1-89: Order::~Order() moved to m1_order.cpp (which now owns the real Order/OrderList pools).
  * The VehicleCargoList destructor is still specialized above the includes. */
@@ -143,9 +141,5 @@ Depot::~Depot() {}
 /* ---- ground-vehicle cache recompute for the road-vehicle instantiation ---- */
 template <> void GroundVehicle<RoadVehicle, VEH_ROAD>::CargoChanged() {}
 
-/* ---- Pool<> methods for the Depot / Vehicle pools (real bodies live in the
- *      uncompiled depot.cpp / vehicle.cpp; explicitly instantiate here) ---- */
-template void *DepotPool::GetNew(size_t size);
-template void DepotPool::FreeItem(size_t index);
 /* VehiclePool::FreeItem removed — now emitted by INSTANTIATE_POOL_METHODS(Vehicle) in
- * m1_vehicle.cpp (real _vehicle_pool). Keeping it here would duplicate -> ld segfault. */
+ * m1_vehicle.cpp (real _vehicle_pool). DepotPool::* likewise lives in m1_depot.cpp. */

@@ -41,7 +41,9 @@ char _station_pool[8192]         = {0};
 char _industry_pool[8192]        = {0};
 #endif
 char _object_pool[8192]          = {0};
+#ifndef R1_MERGE  /* real DepotPool _depot_pool lives in m1_depot.cpp */
 char _depot_pool[8192]           = {0};
+#endif
 char _station_kdtree[4096]       = {0};
 #ifndef R1_MERGE  /* real viewport.o defines _viewport_sign_kdtree in the render-merge build */
 char _viewport_sign_kdtree[4096] = {0};
