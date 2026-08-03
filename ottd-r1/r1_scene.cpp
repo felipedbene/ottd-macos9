@@ -139,9 +139,9 @@ void r1_make_company();          // m1_company.cpp — stand up one player compa
 static bool g_live = false;
 extern "C" int r1_is_live(void) { return g_live ? 1 : 0; }
 
-// R1-47 toolbar state: the real-window toolbar's PAUSE/FAST-FORWARD buttons flip these;
-// r1_tick reads them (pause freezes the sim, fast runs it several sub-steps per frame).
-// The window system + UI stay live while paused (UpdateWindows is independent of r1_tick).
+// Canonical toolbar Pause/Fast-forward drive real globals (_pause_mode from
+// CmdPause, _game_speed from ChangeGameSpeed in gfx.o). Dead R1ToolbarWindow
+// still toggles the locals below; r1_tick ignores them.
 static bool g_r1_paused = false;
 static bool g_r1_fast   = false;
 
@@ -1103,14 +1103,15 @@ extern "C" void r1_tick(void)
     static bool first = true;
     if (first) { first = false; ottd_log("R1: first tick (window is up, engine running)"); }
 
-    // Toolbar PAUSE: freeze the simulation (no date advance, no growth, no bus). The
-    // real window system keeps running independently, so the toolbar stays clickable
-    // and the map stays on screen — clicking PAUSE again resumes.
-    if (g_r1_paused) return;
+    // Canonical toolbar PAUSE posts CMD_PAUSE -> CmdPause sets _pause_mode. Freeze the
+    // simulation (no date advance, no growth, no bus). The window system keeps running
+    // independently, so the toolbar stays clickable — clicking PAUSE again resumes.
+    if (_pause_mode != PM_UNPAUSED) return;
 
-    // Toolbar FAST-FORWARD: run the sim body several times per frame so the town grows
-    // and the bus drives visibly faster. One sub-step normally.
-    int steps = g_r1_fast ? 3 : 1;
+    // Canonical toolbar FAST-FORWARD toggles _game_speed via ChangeGameSpeed (gfx.o).
+    // Run the sim body several times per frame so the town grows / vehicles move faster.
+    const bool fast = (_game_speed != 100);
+    int steps = fast ? 3 : 1;
     static unsigned exp = 0;
     for (int s = 0; s < steps; s++) {
         IncreaseDate();
@@ -1155,10 +1156,10 @@ extern "C" void r1_tick(void)
     // R1-78: drive the whole FLEET. Each bus advances on its own time-accumulator and dirties
     // only its own small screen rect, so N buses cost N tiny targeted marks (no full recomposite).
     for (uint bi = 0; bi < R1_NBUS; bi++)
-        if (r1_bus_move(g_bus[bi], g_r1_fast ? 3 : 1)) { r1_update_vehicle(g_bus[bi]); r1_bus_mark_dirty(g_bus[bi]); }
+        if (r1_bus_move(g_bus[bi], fast ? 3 : 1)) { r1_update_vehicle(g_bus[bi]); r1_bus_mark_dirty(g_bus[bi]); }
     for (int ub = 0; ub < g_nubus; ub++)   // R1-105: user-bought buses
-        if (r1_bus_move(g_ubus[ub], g_r1_fast ? 3 : 1)) { r1_update_vehicle(g_ubus[ub]); r1_bus_mark_dirty(g_ubus[ub]); }
-    r1_train_move(g_r1_fast ? 3 : 1);   // R1-104: the train ping-pongs its rail line
+        if (r1_bus_move(g_ubus[ub], fast ? 3 : 1)) { r1_update_vehicle(g_ubus[ub]); r1_bus_mark_dirty(g_ubus[ub]); }
+    r1_train_move(fast ? 3 : 1);   // R1-104: the train ping-pongs its rail line
 
     // Throttled liveness log: prove on the sink that the clock ticks + town grows.
     // First call confirms the hook fires; then every ~128 ticks show the town
@@ -1665,8 +1666,7 @@ extern "C" void r1_start_window_system(void)
     ottd_log("R1: canonical toolbar up");
 
     // R1-77: open the info window at startup. It's the only place the live stats + real
-    // company money show, and the canonical toolbar's TOWN button is a stub (never calls
-    // r1_toggle_info_window), so nothing else opens it.
+    // company money show alongside the cash bar; town directory is on the toolbar separately.
     new R1InfoWindow(&_r1_info_desc);
     ottd_log("R1: info window up (year/towns/pop/money)");
 
