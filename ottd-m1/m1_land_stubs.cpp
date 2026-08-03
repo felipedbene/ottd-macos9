@@ -104,7 +104,13 @@ TileIterator &DiagonalTileIterator::operator++() { return *this; }
 /* ---- world generation (heightmap / terrain / water conversion) ---- */
 void LoadHeightmap(DetailedFileType, const char *) {}
 void FixSlopes() {}
+#ifndef R1_REAL_TERRAIN
+/* SUPERSEDED. tgp.cpp now owns GenerateTerrainPerlin — the real TerraGenesis
+ * perlin generator. This empty stub existed only because that TU was believed
+ * unlinkable (the genworld cascade); with m1_gwstub.cpp closing its link
+ * surface, the hand-rolled value-noise path is no longer needed. */
 void GenerateTerrainPerlin() {}
+#endif  /* !R1_REAL_TERRAIN */
 
 /* ---- AyStar pathfinder (river routing during map gen only) ---- */
 void AyStar::Init(Hash_HashProc, uint) {}
