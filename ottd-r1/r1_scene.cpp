@@ -1063,7 +1063,19 @@ static void r1_real_bus_tick(R1Bus &b, bool log_events)
             }
             b.rv_dwell = 8 + (int)got;                    // proportional boarding pause
         } else if (--b.rv_dwell == 0) {
-            SetBit(rv->vehicle_flags, VF_LOADING_FINISHED);
+            // R1-177: the REAL load/unload machinery finishes the stop. The cargo
+            // bridge above already moved the R1 cargo; the real LoadUnloadStation
+            // (economy.cpp) walks st->loading_vehicles (the real BeginLoading queued
+            // this bus and PrepareUnload gave it a real CargoPayment), finds nothing
+            // left to move in the permanently-empty packet lists, and sets
+            // VF_LOADING_FINISHED itself — HandleLoading then departs and advances
+            // the order chain. All real code; the manual SetBit is retired.
+            Station *st = Station::GetIfValid(rv->last_station_visited);
+            if (st != nullptr) {
+                LoadUnloadStation(st);
+            } else {
+                SetBit(rv->vehicle_flags, VF_LOADING_FINISHED);   // fallback, should not happen
+            }
             if (log_events) ottd_log("R1 RV EVENT: DEPART pax=%u", b.rv_pax);
         }
     }
