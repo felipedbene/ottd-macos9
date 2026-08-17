@@ -68,7 +68,7 @@ SRC_TUS=(roadveh_cmd.cpp vehicle.cpp engine.cpp order_cmd.cpp roadstop.cpp rail.
 # M1 support TUs (shims/stubs/pools) — engine-calibrated, minus the gfx-owned dups.
 # m1_viewport_stubs = no-op window/vehicle/sign surface viewport.cpp links against.
 # m1_text_stubs = the 4 symbols the real font/layout TUs need (config/utf8/glyphs).
-M1_TUS=(m1_shims m1_ecostub m1_methods m1_pools m1_profiling_stub m1_town_stubs m1_cmd_stubs m1_land_stubs m1_road_stubs m1_viewport_stubs m1_text_stubs m1_world_stubs m1_water_draw m1_industry_draw m1_window_stubs m1_strings_stubs m1_toolbar_stubs m1_company m1_vehicle m1_economy m1_finance_gui m1_industry m1_depot m1_town_directory_gui m1_station m1_company_gui m1_station_gui m1_vehicle_list_gui m1_graph_gui m1_station_draw m1_order m1_pathfind m1_town_gui m1_industry_gui m1_smallmap_gui m1_subsidy_gui m1_rail_draw m1_train m1_realveh_stubs m1_rvstub_airsea m1_rvstub_group m1_rvstub_econ m1_rvstub_infra zz_marker)
+M1_TUS=(m1_shims aa_mark ac_mark b1z_mark b2z_mark bz_mark cb_mark cz_mark dz_mark ee_mark mm_mark sz_mark vv_mark m1_ecostub m1_methods m1_pools m1_profiling_stub m1_town_stubs m1_cmd_stubs m1_land_stubs m1_road_stubs m1_viewport_stubs m1_text_stubs m1_world_stubs m1_water_draw m1_industry_draw m1_window_stubs m1_strings_stubs m1_toolbar_stubs m1_company m1_vehicle m1_economy m1_finance_gui m1_industry m1_depot m1_town_directory_gui m1_station m1_company_gui m1_station_gui m1_vehicle_list_gui m1_graph_gui m1_station_draw m1_order m1_pathfind m1_town_gui m1_industry_gui m1_smallmap_gui m1_subsidy_gui m1_rail_draw m1_train m1_realveh_stubs m1_rvstub_airsea m1_rvstub_group m1_rvstub_econ m1_rvstub_infra zz_marker)
 
 # --- parallel compile --------------------------------------------------------
 # The 60 TUs are independent single `g++ -c src -o obj` calls, and they used to run
@@ -230,6 +230,14 @@ extern "C" int macsys_scroll(int, int, int, int, int, int); /* Step4: ottd-b2/ma
   fi
 
   run_queue
+
+  # R1-182 Classic-forensics probe: rename economy.o so its static ctor runs at
+  # the TAIL of the (reverse-alphabetical) default-ctor chain instead of where
+  # the lamp trace shows the death. If the death follows the TU, its ctor is
+  # guilty by CONTENT; if death stays at the old chain position, the mechanism
+  # is cumulative/positional. Costs one redundant recompile per build while the
+  # probe lives (mtime gate misses the renamed obj). Remove after the hunt.
+  if [ -f "$R1/obj/economy.o" ]; then mv -f "$R1/obj/economy.o" "$R1/obj/ab_econ.o"; fi
 }
 
 # netlog.o is not produced by any cmake target and is covered by .gitignore's *.o,

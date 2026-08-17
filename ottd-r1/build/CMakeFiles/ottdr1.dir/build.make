@@ -143,13 +143,22 @@ ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/../ottd-b1/8bpp_base.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/../ottd-b1/tile_map.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/../ottd-b1/map.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/../ottd-b1/bitmath_func.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/aa_mark.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/ab_econ.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/ac_mark.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/b1_shims.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/b1z_mark.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/b2_shims.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/b2z_mark.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/bz_mark.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/cargotype.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/cb_mark.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/clear_cmd.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/cz_mark.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/date.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/dropdown.o
-ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/economy.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/dz_mark.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/ee_mark.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/engine.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/fontcache.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/gfx_layout.o
@@ -199,6 +208,7 @@ ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_viewport_stubs.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_water_draw.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_window_stubs.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_world_stubs.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/mm_mark.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/order_cmd.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/pool_func.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/r1_scene.o
@@ -209,6 +219,7 @@ ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/roadstop.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/roadveh_cmd.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/spritefontcache.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/strings.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/sz_mark.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/toolbar_gui.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/town_cmd.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/townname.o
@@ -216,6 +227,7 @@ ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/tree_cmd.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/vehicle.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/viewport.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/void_cmd.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/vv_mark.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/widget.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/window.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/zz_marker.o
