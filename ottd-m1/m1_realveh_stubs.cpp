@@ -57,6 +57,8 @@
 
 #include "safeguards.h"
 
+extern "C" void ottd_log(const char *fmt, ...);   /* netlog tee (sink + file) */
+
 /* ---------------------------------------------------------------------------
  * Pathfinder: the real reason this file exists.
  *
@@ -66,7 +68,14 @@
  * vehicle's destination? We path from `tile` to v->dest_tile, take the first hop,
  * and convert that step into a trackdir.
  * ------------------------------------------------------------------------- */
-extern "C" int r1_road_path(uint from, uint to, unsigned short *out, int max_len);
+/* R1-166: the out array is uint32 (m1_pathfind writes 4-byte tile ids). This TU
+ * declared it `unsigned short *` since R1-140 — on big-endian PPC route[1] then
+ * read the LOW HALF of route[0] (the start tile itself), R1TrackdirTowards never
+ * matched, and EVERY junction choice silently fell back to an arbitrary first
+ * trackdir. The real-controller bus wandered instead of pathing (R1-165 trace:
+ * hop==tile, td=255 at every single choice). C has no cross-TU signature check
+ * for extern "C" — this cost three debugging builds. */
+extern "C" int r1_road_path(uint from, uint to, unsigned *out, int max_len);
 
 /* Pick, out of the trackdirs the caller is OFFERING, the one whose exit leads to
  * `next`. Searching the offered mask rather than constructing a trackdir from a
@@ -85,10 +94,53 @@ static Trackdir R1TrackdirTowards(TileIndex tile, TileIndex next, TrackdirBits t
 Trackdir YapfRoadVehicleChooseTrack(const RoadVehicle *v, TileIndex tile, DiagDirection,
 		TrackdirBits trackdirs, bool &path_found, RoadVehPathCache &)
 {
-	unsigned short route[96];
+	unsigned route[96];
 	path_found = false;
 	if (v != nullptr && v->dest_tile != INVALID_TILE) {
-		int len = r1_road_path((uint)tile, (uint)v->dest_tile, route, 96);
+		/* R1-150: the order machinery aims road vehicles at the station SIGN
+		 * (GetOrderStationLocation returns st->xy — usually not even a road tile)
+		 * and leaves "any road stop of that station" to the pathfinder's goal set.
+		 * Real YAPF knows that; a BFS needs ONE concrete road tile. Resolve the
+		 * sign to the station's nearest bus stop or the bus orbits the sign
+		 * forever (R1-149 sink evidence: drove past dest, circling at spd 60). */
+		TileIndex dest = v->dest_tile;
+		if (v->current_order.IsType(OT_GOTO_STATION)) {
+			const Station *st = Station::GetIfValid(v->current_order.GetDestination());
+			if (st != nullptr) {
+				uint best = UINT_MAX;
+				for (const RoadStop *rs = st->bus_stops; rs != nullptr; rs = rs->next) {
+					/* Skip the Rung-1 sign-tile placeholder (not a real stop tile). */
+					if (!IsTileType(rs->xy, MP_STATION)) continue;
+					uint d = DistanceManhattan(tile, rs->xy);
+					if (d < best) { best = d; dest = rs->xy; }
+				}
+			}
+		}
+		int len = r1_road_path((uint)tile, (uint)dest, route, 96);
+		/* Diagnostic (near-destination only): the R1-164 trace showed the bus
+		 * turning WEST at the junction one tile from the resolved stop — either
+		 * the offered trackdirs mask lacks the east exit or the BFS hop is not
+		 * what we think. Log the full decision inputs to settle it. */
+		{
+			static int s_pf_logs = 0;
+			if (s_pf_logs < 12 && DistanceManhattan(tile, dest) <= 4) {
+				s_pf_logs++;
+				Trackdir dbg_td = (len >= 2)
+					? R1TrackdirTowards(tile, (TileIndex)route[1], trackdirs) : INVALID_TRACKDIR;
+				ottd_log("R1 PF@: tile=%u dest=%u len=%d hop=%u mask=0x%x td=%d",
+				         (uint)tile, (uint)dest, len,
+				         (len >= 2) ? (uint)route[1] : 0u,
+				         (uint)trackdirs, (int)dbg_td);
+			}
+		}
+		{
+			static int s_nopath_logs = 0;
+			if (len < 2 && s_nopath_logs < 10) {
+				s_nopath_logs++;
+				ottd_log("R1 PF: NO PATH %u -> %u (len=%d, fallback trackdir)",
+				         (uint)tile, (uint)dest, len);
+			}
+		}
 		if (len >= 2) {
 			Trackdir td = R1TrackdirTowards(tile, (TileIndex)route[1], trackdirs);
 			if (td != INVALID_TRACKDIR) { path_found = true; return td; }

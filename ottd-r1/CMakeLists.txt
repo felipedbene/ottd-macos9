@@ -10,7 +10,7 @@ set(B2  ${CMAKE_CURRENT_SOURCE_DIR}/../ottd-b2)
 set(TCLIB ${CMAKE_CURRENT_SOURCE_DIR}/../Retro68-build/toolchain/powerpc-apple-macos/lib)
 
 set(OT_LIBS
-    ${B2}/netlog.o ${B2}/statsd_ot.o ${B2}/OpenTransportAppPPC.o ${B2}/OpenTptInetPPC.o
+    ${B2}/netlog.o ${B2}/statsd_ot.o ${B2}/aslm_stubs.o ${B2}/OpenTransportAppPPC.o ${B2}/OpenTptInetPPC.o
     ${TCLIB}/libOpenTransportLib.a ${TCLIB}/libOpenTptInternetLib.a)
 
 # Engine + M1-support objects built by build.sh with the merge flags.
@@ -24,7 +24,12 @@ target_include_directories(ottdr1 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${B2})
 # that random name used to land in the xcoff symtab and broke build determinism
 # (measured: 12 of the 27 differing bytes between two clean builds). Side effect:
 # ottdr1.xcoff.cdtor.{c,o} are left in the build dir — harmless scratch.
-target_link_options(ottdr1 PRIVATE -save-temps "LINKER:--gc-sections")
+# -bnogc: XCOFF csect gc is ON by default (-bgc; the old --gc-sections flag was
+# a no-op) and only "worked" because it pruned Apple glue csects with unresolved
+# refs — now satisfied by aslm_stubs.o. A wrong prune of a live csect resolves
+# its symbol into a NEIGHBOURING csect (the rung-2 layout-sensitive Type 2
+# mechanism); with gc off nothing is pruned and layout is stable by construction.
+target_link_options(ottdr1 PRIVATE -save-temps "LINKER:-bnogc")
 target_link_libraries(ottdr1
     # Mac-side render/video driver + scene (reused prebuilt from B2).
     # b2_scene.o replaced by obj/r1_scene.o (from the R1_ENGINE_OBJS glob): draws

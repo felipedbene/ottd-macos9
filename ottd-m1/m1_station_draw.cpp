@@ -33,6 +33,12 @@
 #include "slope_func.h"
 #include "tile_map.h"
 #include "station_map.h"       /* MakeDriveThroughRoadStop, GetStationGfx, MP_STATION accessors */
+#include "station_base.h"      /* Station::GetIfValid (R1-164: link the stop into the chain) */
+#include "roadstop_base.h"     /* RoadStop pool object at the stop tile */
+#include "roadveh.h"           /* RoadVehicle, RVSB_* (R1-168: real stop entry proc) */
+#include "track_func.h"        /* IsReversingRoadTrackdir */
+
+extern "C" void ottd_log(const char *fmt, ...);   /* netlog tee (sink + file) */
 #include "road_map.h"          /* GetRoadOwner, RTT_ROAD */
 #include "company_func.h"      /* _local_company */
 
@@ -112,14 +118,61 @@ static void GetTileDesc_Station(TileIndex tile, TileDesc *td)
 static void TileLoop_Station(TileIndex tile) {}
 static void ChangeTileOwner_Station(TileIndex tile, Owner old_owner, Owner new_owner) {}
 
+/* R1-170: the ROAD branch of the real GetTileTrackStatus_Station
+ * (station_cmd.cpp:3220), verbatim. The old `return 0` made every stop tile
+ * TRACKLESS: the real controller (and the pathfinder's trackdir filter) saw a
+ * WALL where the drive-through stop is, chose the reversing trackdir at the
+ * adjacent junction, and orbited the block forever — the actual root of the
+ * R1-149→169 "bus never arrives" saga. Rail/water stay 0: no rail stations or
+ * buoys exist in R1. */
 static TrackStatus GetTileTrackStatus_Station(TileIndex tile, TransportType mode, uint sub_mode, DiagDirection side)
 {
-	return 0;
+	TrackBits trackbits = TRACK_BIT_NONE;
+
+	if (mode == TRANSPORT_ROAD && IsRoadStop(tile)) {
+		RoadTramType rtt = (RoadTramType)sub_mode;
+		if (HasTileRoadType(tile, rtt)) {
+			DiagDirection dir = GetRoadStopDir(tile);
+			Axis axis = DiagDirToAxis(dir);
+			if (side == INVALID_DIAGDIR ||
+			    (axis == DiagDirToAxis(side) && !(IsStandardRoadStopTile(tile) && dir != side))) {
+				trackbits = AxisToTrackBits(axis);
+			}
+		}
+	}
+
+	return CombineTrackStatus(TrackBitsToTrackdirBits(trackbits), TRACKDIR_BIT_NONE);
 }
 
 static CommandCost TerraformTile_Station(TileIndex tile, DoCommandFlag flags, int z_new, Slope tileh_new)
 {
 	return_cmd_error(STR_EMPTY);
+}
+
+/* R1-168: the VEH_ROAD branch of the real VehicleEnter_Station
+ * (station_cmd.cpp:3330), verbatim. With this slot nullptr the rung-2 bus DROVE
+ * STRAIGHT THROUGH its stop: no RoadStop::Enter, no bay, no state change, no
+ * arrival — and then orbited the block forever chasing the unsatisfied order
+ * (R1-166/167 traces). Trains stay out: the cosmetic train never stops. */
+static VehicleEnterTileStatus R1VehicleEnter_Station(Vehicle *v, TileIndex tile, int, int)
+{
+	if (v->type == VEH_ROAD) {
+		RoadVehicle *rv = RoadVehicle::From(v);
+		static int s_enter_logs = 0;
+		if (s_enter_logs < 12) {
+			s_enter_logs++;
+			ottd_log("R1 ENTER: tile=%u state=%u frame=%u front=%d isstop=%d",
+			         (unsigned)tile, (unsigned)rv->state, (unsigned)rv->frame,
+			         (int)rv->IsFrontEngine(), (int)IsRoadStop(tile));
+		}
+		if (rv->state < RVSB_IN_ROAD_STOP && !IsReversingRoadTrackdir((Trackdir)rv->state) && rv->frame == 0) {
+			if (IsRoadStop(tile) && rv->IsFrontEngine()) {
+				/* Attempt to allocate a parking bay in a road stop */
+				return RoadStop::GetByTile(tile, GetRoadStopType(tile))->Enter(rv) ? VETSB_CONTINUE : VETSB_CANNOT_ENTER;
+			}
+		}
+	}
+	return VETSB_CONTINUE;
 }
 
 extern const TileTypeProcs _tile_type_station_procs = {
@@ -134,7 +187,7 @@ extern const TileTypeProcs _tile_type_station_procs = {
 	TileLoop_Station,           // tile_loop_proc
 	ChangeTileOwner_Station,    // change_tile_owner_proc
 	nullptr,                    // add_produced_cargo_proc
-	nullptr,                    // vehicle_enter_tile_proc
+	R1VehicleEnter_Station,     // vehicle_enter_tile_proc (R1-168: real road-stop entry)
 	GetFoundation_Station,      // get_foundation_proc
 	TerraformTile_Station,      // terraform_tile_proc
 };
@@ -167,4 +220,26 @@ extern "C" void r1_place_bus_stop(unsigned tile, unsigned station_index, int axi
 	MakeDriveThroughRoadStop(t, _local_company /*station*/, road_owner /*road*/,
 	                         INVALID_OWNER /*tram*/, (StationID)station_index,
 	                         ROADSTOP_BUS, ROADTYPE_ROAD, INVALID_ROADTYPE, a);
+
+	/* R1-164: the map tile alone is only half a stop. The real controller's arrival
+	 * path (roadveh_cmd.cpp:1496) does RoadStop::GetByTile(v->tile,...) — a walk of
+	 * the owning Station's bus_stops chain comparing rs->xy — and the BFS pathfinder
+	 * shim aims at chain entries. Without a pool object AT THIS TILE the walk finds
+	 * nothing (null deref on arrival) and the shim can only aim at the Rung-1
+	 * sign-tile placeholder (the R1-149/151 "bus orbits the sign" trace). Append a
+	 * real RoadStop exactly like CmdBuildRoadStop does. */
+	Station *st = Station::GetIfValid((StationID)station_index);
+	if (st != nullptr && RoadStop::CanAllocateItem()) {
+		RoadStop *rs = new RoadStop(t);
+		/* R1-166: a DRIVE-THROUGH stop needs its Entry bookkeeping built (the
+		 * real CmdBuildRoadStop calls this right after MakeDriveThroughRoadStop,
+		 * station_cmd.cpp:1914). Without it RoadStop::Enter refuses the vehicle
+		 * and the controller diverts around the stop forever (R1-166 trace: bus
+		 * chose the stopward trackdir, got turned away, looped the block). Must
+		 * run AFTER the map tile is written — MakeDriveThrough scans it. */
+		rs->MakeDriveThrough();
+		RoadStop **tail = &st->bus_stops;
+		while (*tail != nullptr) tail = &(*tail)->next;
+		*tail = rs;
+	}
 }

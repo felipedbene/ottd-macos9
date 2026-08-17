@@ -158,6 +158,7 @@ ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_cmd_stubs.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_company.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_company_gui.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_deadpools.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_depot.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_economy.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_finance_gui.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_graph_gui.o
@@ -217,6 +218,7 @@ ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/widget.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/window.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/../ottd-b2/netlog.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/../ottd-b2/statsd_ot.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/../ottd-b2/aslm_stubs.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/../ottd-b2/OpenTransportAppPPC.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/../ottd-b2/OpenTptInetPPC.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/../Retro68-build/toolchain/powerpc-apple-macos/lib/libOpenTransportLib.a

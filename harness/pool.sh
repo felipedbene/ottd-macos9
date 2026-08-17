@@ -117,7 +117,7 @@ cmd_start() {
     # with an empty CD drive (a sweep lost a whole run to a banner that could
     # never come). Explicit-on-the-command-line beats both server env and
     # tmux's own env inheritance.
-    ssh_ "WARM=${WARM:-0} tmux new-session -d -s slot$slot 'WARM=${WARM:-0} $REMOTE_HOME/run-slot.sh $slot 2>&1 | tee $REMOTE_HOME/slot$slot.log'"
+    ssh_ "WARM=${WARM:-0} tmux new-session -d -s slot$slot 'WARM=${WARM:-0} QEMU_EXTRA=\"${QEMU_EXTRA:-}\" $REMOTE_HOME/run-slot.sh $slot 2>&1 | tee $REMOTE_HOME/slot$slot.log'"
     echo "slot $slot started (QMP $(qmp_port "$slot"), VNC :$slot)"
     # Wait for QMP to bind so callers can drive the slot immediately after start.
     for _ in 1 2 3 4 5 6 7 8 9 10; do

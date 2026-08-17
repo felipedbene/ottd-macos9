@@ -91,4 +91,9 @@ else
 fi
 
 echo "slot $SLOT: QMP 127.0.0.1:$QMP_PORT, VNC $VNC_DISPLAY, disk $DISK"
-exec qemu-system-ppc "${args[@]}"
+# QEMU_EXTRA: optional extra qemu args (space-separated), e.g. crash forensics
+# with "-d int -D /home/felipe/slotN-int.log" to log every guest exception
+# (SRR0/DAR of a Type 2 land in the log). Empty by default; word-splitting is
+# intentional.
+# shellcheck disable=SC2086
+exec qemu-system-ppc "${args[@]}" ${QEMU_EXTRA:-}

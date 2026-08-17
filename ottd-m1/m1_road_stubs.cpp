@@ -138,8 +138,13 @@ uint Vehicle::Crash(bool) { return 0; }
 /* R1-89: Order::~Order() moved to m1_order.cpp (which now owns the real Order/OrderList pools).
  * The VehicleCargoList destructor is still specialized above the includes. */
 
-/* ---- ground-vehicle cache recompute for the road-vehicle instantiation ---- */
-template <> void GroundVehicle<RoadVehicle, VEH_ROAD>::CargoChanged() {}
+/* ---- ground-vehicle cache recompute for the road-vehicle instantiation ----
+ * R1-147: the no-op specialisation is GONE. It was a STRONG symbol shadowing the
+ * REAL (weak, template-emitted) CargoChanged in ground_vehicle.o, so the rung-2
+ * bus's cache pass silently did nothing and gcache.cached_max_track_speed stayed
+ * 0 — clamping GetCurrentMaxSpeed to a permanent standstill. The real one now
+ * binds; its inputs (GetWeight/GetPower/GetMaxTrackSpeed engine reads) are all
+ * served by the real engine pool (R1-141). */
 
 /* VehiclePool::FreeItem removed — now emitted by INSTANTIATE_POOL_METHODS(Vehicle) in
  * m1_vehicle.cpp (real _vehicle_pool). DepotPool::* likewise lives in m1_depot.cpp. */
