@@ -261,6 +261,10 @@ struct R1Bus {
     bool orders_done;                    // R1-89: real order chain attached to v exactly once
     int  order_leg;                      // R1-91: which order (0=A,1=B) the bus is currently driving toward
     int  dwell;                          // R1-101: frames left paused at a stop (loading/unloading)
+    bool real;                           // R1-174 rung 3: v is REAL-controller-driven; the hand
+                                         // r1_bus_move/r1_update_vehicle path is skipped entirely
+    int  rv_dwell;                       // R1-174: loading-bridge boarding pause (real buses)
+    unsigned rv_pax;                     // R1-174: passengers aboard the real bus
 };
 static R1Bus g_bus[R1_NBUS];             // zero-init: len=0 (no route) until traced
 // R1-105 interactive: user-bought buses (the auto fleet g_bus[] is full at startup). Driven by r1_tick.
@@ -922,14 +926,75 @@ static void r1_update_vehicle(R1Bus &b)
 }
 
 // ===== R1-144 RUNG 2: a bus the REAL RoadVehController drives =====
-// The hand-driven fleet (g_bus[]) is untouched: this is an ADDITIONAL vehicle built the
-// way the game builds one — in a road depot, via CmdBuildRoadVehicle — so every cache
-// (cached_max_speed, veh_length, first_engine) is set by the game's own code, not by us.
-// Its Tick() then runs RoadVehController: LeaveDepot, real sub-tile movement over the
-// route's road tiles, order-driven turnarounds at the two real stations, station entry
-// through the real VehicleEnter_* tile procs. Once this bus proves itself on the pool,
-// the puppets can be converted one by one (and r1_bus_move retired).
-static RoadVehicle *g_realbus = nullptr;
+// R1-174 rung 3: the fleet converts to REAL-controller buses one at a time. Each is
+// built the way the game builds one — in a road depot, via CmdBuildRoadVehicle — so
+// every cache (cached_max_speed, veh_length, first_engine) is set by the game's own
+// code, not by us. Tick() then runs RoadVehController: LeaveDepot, real sub-tile
+// movement, order-driven turnarounds at the two real stations, station entry through
+// the real VehicleEnter_* tile procs. `real` buses skip the r1_bus_move puppet path.
+static RoadVehicle *g_realbus = nullptr;   // bus0's real vehicle (heartbeat telemetry)
+
+static bool r1_make_real_bus(R1Bus &b, int idx)
+{
+    if (b.len < 4 || b.sa == 0xFFFF || b.sb == 0xFFFF) {
+        ottd_log("R1-RUNG2: bus%d route unusable (len=%d sa=%u sb=%u) — stays a puppet",
+                 idx, b.len, b.sa, b.sb);
+        return false;
+    }
+    int eng = r1_first_road_engine();
+    if (eng < 0 || eng == 0xFFFF) { ottd_log("R1-RUNG2: no road engine in pool"); return false; }
+
+    // Depot site: walk the route (skipping the endpoints and any station tile) for a
+    // plain road tile with a CLEAR neighbour. Depot goes on the neighbour, exit facing
+    // the route; the route tile gets the connecting road stub so the exit is drivable.
+    // Walk from the CORNER end so the depot lands near the first ordered station (sb).
+    // Conversions after the first find their corner's tile already taken (routes can
+    // share corners) and naturally settle on the next site along their own route.
+    for (int k = b.len - 2; k >= 1; k--) {
+        TileIndex rt_tile = b.route[k];
+        if (!IsTileType(rt_tile, MP_ROAD)) continue;                 // skip stops/junctions gone to MP_STATION
+        for (DiagDirection d = DIAGDIR_BEGIN; d < DIAGDIR_END; d++) {
+            TileIndex dt = TileAddByDiagDir(rt_tile, d);
+            if (dt >= MapSize() || !IsTileType(dt, MP_CLEAR)) continue;
+            unsigned depot_id = r1_make_depot((unsigned)dt, (int)ReverseDiagDir(d));
+            if (depot_id == 0xFFFF) { ottd_log("R1-RUNG2: depot pool refused"); return false; }
+            // Connect: the route tile needs a road bit toward the depot or the exit is a wall.
+            SetRoadBits(rt_tile, GetRoadBits(rt_tile, RTT_ROAD) | DiagDirToRoadBits(d), RTT_ROAD);
+            MarkTileDirtyByTile(rt_tile);
+
+            CompanyID save_co = _current_company;
+            _current_company = COMPANY_FIRST;
+            Vehicle *veh = nullptr;
+            CmdBuildRoadVehicle(DC_EXEC, dt, Engine::Get((EngineID)eng), &veh);
+            _current_company = save_co;
+            if (veh == nullptr) { ottd_log("R1-RUNG2: CmdBuildRoadVehicle built nothing"); return false; }
+
+            RoadVehicle *rv = (RoadVehicle *)veh;
+            // GetCurrentMaxSpeed reads gcache.cached_max_track_speed, which vanilla fills
+            // only through the CargoChanged/PowerChanged cache pass — a pass
+            // CmdBuildRoadVehicle skips under AM_ORIGINAL. Left at 0 it clamps
+            // DoUpdateSpeed to a permanent standstill at the depot mouth (R1-145 sink
+            // evidence: frame=6 spd=0 forever). Run the game's own pass.
+            rv->CargoChanged();
+            // Orders: the bus spawns near the CORNER end, so head for the corner
+            // station first (station_a of the helper becomes current_order).
+            r1_attach_bus_orders(veh, b.sb, b.sa);
+            veh->vehstatus &= ~VS_STOPPED;             // release: Tick()'s LeaveDepot takes over
+                                                       // (after CargoChanged: PowerChanged re-stops
+                                                       // a powerless vehicle, which we'd mask)
+            b.v = veh;
+            b.real = true;
+            b.rv_dwell = 0;
+            b.rv_pax = 0;
+            ottd_log("R1-RUNG2: bus%d REAL unit=%u engine=%d depot=(%d,%d) exit=%d maxspd=%u",
+                     idx, (uint)veh->unitnumber, eng, (int)TileX(dt), (int)TileY(dt),
+                     (int)ReverseDiagDir(d), (uint)rv->vcache.cached_max_speed);
+            return true;
+        }
+    }
+    ottd_log("R1-RUNG2: bus%d found no depot site — stays a puppet", idx);
+    return false;
+}
 
 static void r1_rung2_setup(void)
 {
@@ -945,61 +1010,63 @@ static void r1_rung2_setup(void)
     // (YapfRoadVehicleChooseTrack -> r1_road_path), so declare it.
     _settings_game.pf.pathfinder_for_roadvehs = VPF_YAPF;
 
-    R1Bus &b = g_bus[0];
-    if (b.len < 4 || b.sa == 0xFFFF || b.sb == 0xFFFF) {
-        ottd_log("R1-RUNG2: no usable bus0 route (len=%d sa=%u sb=%u) — real bus skipped",
-                 b.len, b.sa, b.sb);
-        return;
-    }
-    int eng = r1_first_road_engine();
-    if (eng < 0 || eng == 0xFFFF) { ottd_log("R1-RUNG2: no road engine in pool"); return; }
+    // R1-175 rung 3, iteration B: the WHOLE fleet converts to the real controller
+    // (bus0 proved the path as R1-174, 12/12). Two buses share a corner station
+    // (5 buses round-robin over 4 corners) — bay contention is the real
+    // controller's job now, exactly as in the shipping game. A bus whose route
+    // can't host a depot stays a puppet and the hand path still drives it.
+    for (uint bi = 0; bi < R1_NBUS; bi++)
+        if (r1_make_real_bus(g_bus[bi], (int)bi) && bi == 0)
+            g_realbus = (RoadVehicle *)g_bus[0].v;
+}
 
-    // Depot site: walk bus0's route (skipping the endpoints and any station tile) for a
-    // plain road tile with a CLEAR neighbour. Depot goes on the neighbour, exit facing
-    // the route; the route tile gets the connecting road stub so the exit is drivable.
-    // Walk from the CORNER end so the depot lands near the first ordered station (sb):
-    // the QEMU guests wedge after ~650 ticks (the known nanokernel freeze), and a
-    // spawn at the centre end put arrival past the freeze — unobservable (R1-148).
-    for (int k = b.len - 2; k >= 1; k--) {
-        TileIndex rt_tile = b.route[k];
-        if (!IsTileType(rt_tile, MP_ROAD)) continue;                 // skip stops/junctions gone to MP_STATION
-        for (DiagDirection d = DIAGDIR_BEGIN; d < DIAGDIR_END; d++) {
-            TileIndex dt = TileAddByDiagDir(rt_tile, d);
-            if (dt >= MapSize() || !IsTileType(dt, MP_CLEAR)) continue;
-            unsigned depot_id = r1_make_depot((unsigned)dt, (int)ReverseDiagDir(d));
-            if (depot_id == 0xFFFF) { ottd_log("R1-RUNG2: depot pool refused"); return; }
-            // Connect: the route tile needs a road bit toward the depot or the exit is a wall.
-            SetRoadBits(rt_tile, GetRoadBits(rt_tile, RTT_ROAD) | DiagDirToRoadBits(d), RTT_ROAD);
-            MarkTileDirtyByTile(rt_tile);
+// Per-tick drive of one REAL bus. The controller does everything; we only
+// complete LOADING (economy.cpp is a later rung — vanilla runs LoadUnloadVehicle
+// from CallVehicleTicks) and, for bus0, emit the event telemetry.
+static void r1_real_bus_tick(R1Bus &b, bool log_events)
+{
+    RoadVehicle *rv = (RoadVehicle *)b.v;
+    if (rv == nullptr) return;
+    rv->Tick();
 
-            CompanyID save_co = _current_company;
-            _current_company = COMPANY_FIRST;
-            Vehicle *veh = nullptr;
-            CmdBuildRoadVehicle(DC_EXEC, dt, Engine::Get((EngineID)eng), &veh);
-            _current_company = save_co;
-            if (veh == nullptr) { ottd_log("R1-RUNG2: CmdBuildRoadVehicle built nothing"); return; }
-
-            g_realbus = (RoadVehicle *)veh;
-            // GetCurrentMaxSpeed reads gcache.cached_max_track_speed, which vanilla fills
-            // only through the CargoChanged/PowerChanged cache pass — a pass
-            // CmdBuildRoadVehicle skips under AM_ORIGINAL. Left at 0 it clamps
-            // DoUpdateSpeed to a permanent standstill at the depot mouth (R1-145 sink
-            // evidence: frame=6 spd=0 forever). Run the game's own pass.
-            g_realbus->CargoChanged();
-            // Orders: bus0 starts at the CENTRE end of its route, so head for the corner
-            // station first (station_a of the helper becomes current_order).
-            r1_attach_bus_orders(veh, b.sb, b.sa);
-            veh->vehstatus &= ~VS_STOPPED;             // release: Tick()'s LeaveDepot takes over
-                                                       // (after CargoChanged: PowerChanged re-stops
-                                                       // a powerless vehicle, which we'd mask)
-            ottd_log("R1-RUNG2: real bus unit=%u engine=%d depot=(%d,%d) exit=%d maxspd=%u len=%u",
-                     (uint)veh->unitnumber, eng, (int)TileX(dt), (int)TileY(dt),
-                     (int)ReverseDiagDir(d), (uint)g_realbus->vcache.cached_max_speed,
-                     (uint)g_realbus->gcache.cached_total_length);
-            return;
+    if (log_events) {
+        static uint s_arr = 0xFFFF, s_dest = 0xFFFF;
+        if ((uint)rv->last_station_visited != s_arr) {
+            s_arr = (uint)rv->last_station_visited;
+            if (s_arr != 0xFFFF)
+                ottd_log("R1 RV EVENT: ARRIVED st=%u x=%d y=%d state=%u",
+                         s_arr, (int)rv->x_pos, (int)rv->y_pos, (uint)rv->state);
+        }
+        uint d = (uint)rv->current_order.GetDestination();
+        if (d != s_dest) {
+            s_dest = d;
+            ottd_log("R1 RV EVENT: ORDER -> st=%u (type=%u) oi=%u/%u",
+                     d, (uint)rv->current_order.GetType(),
+                     (uint)rv->cur_real_order_index, (uint)rv->GetNumOrders());
         }
     }
-    ottd_log("R1-RUNG2: no depot site along bus0 route — real bus skipped");
+
+    // Loading bridge: board/alight through the same real-station economy the
+    // puppets use, dwell proportionally, then set VF_LOADING_FINISHED so the
+    // controller's own HandleLoading departs AND advances the order chain.
+    if (rv->current_order.IsType(OT_LOADING)) {
+        if (b.rv_dwell == 0) {
+            unsigned got = 0;
+            const Station *rst = Station::GetIfValid(rv->last_station_visited);
+            if (rst != nullptr && rst->town != nullptr) {
+                if (b.rv_pax > 0) {                       // alight + fare first
+                    r1_deliver_cargo(b.rv_pax, (unsigned)b.len);
+                    b.rv_pax = 0;
+                }
+                got = r1_station_take_cargo((unsigned)rst->town->index, R1_BUS_CAP);
+                b.rv_pax = got;
+            }
+            b.rv_dwell = 8 + (int)got;                    // proportional boarding pause
+        } else if (--b.rv_dwell == 0) {
+            SetBit(rv->vehicle_flags, VF_LOADING_FINISHED);
+            if (log_events) ottd_log("R1 RV EVENT: DEPART pax=%u", b.rv_pax);
+        }
+    }
 }
 
 // ===== R1-104: a real TRAIN on real MP_RAILWAY track =====
@@ -1249,72 +1316,16 @@ extern "C" void r1_tick(void)
     // via last_houses' MarkWholeScreenDirty above.
     // R1-78: drive the whole FLEET. Each bus advances on its own time-accumulator and dirties
     // only its own small screen rect, so N buses cost N tiny targeted marks (no full recomposite).
-    for (uint bi = 0; bi < R1_NBUS; bi++)
-        if (r1_bus_move(g_bus[bi], fast ? 3 : 1)) { r1_update_vehicle(g_bus[bi]); r1_bus_mark_dirty(g_bus[bi]); }
+    // R1-174: REAL buses skip the puppet path — their controller moves, dirties and
+    // draws them through the game's own machinery.
+    for (uint bi = 0; bi < R1_NBUS; bi++) {
+        R1Bus &b = g_bus[bi];
+        if (b.real) { r1_real_bus_tick(b, bi == 0); continue; }
+        if (r1_bus_move(b, fast ? 3 : 1)) { r1_update_vehicle(b); r1_bus_mark_dirty(b); }
+    }
     for (int ub = 0; ub < g_nubus; ub++)   // R1-105: user-bought buses
         if (r1_bus_move(g_ubus[ub], fast ? 3 : 1)) { r1_update_vehicle(g_ubus[ub]); r1_bus_mark_dirty(g_ubus[ub]); }
     r1_train_move(fast ? 3 : 1);   // R1-104: the train ping-pongs its rail line
-    // R1-144 RUNG 2: the real bus runs the game's own state machine. Tick() does
-    // everything — LeaveDepot, movement, orders, station entry — and publishes its own
-    // viewport updates, so no r1_update_vehicle/mark_dirty is needed (or wanted) here.
-    // Ticked 2x: the QEMU guests wedge ~tick 650 (known nanokernel freeze), and at 1x
-    // the station arrival sits right on that edge — unobservable two runs straight.
-    if (g_realbus != nullptr) {
-        g_realbus->Tick();
-        g_realbus->Tick();
-        // Event logs, immune to the 128-tick heartbeat cadence: the game sets
-        // last_station_visited on real arrival, and order advance changes the
-        // destination. Either firing is rung-2 proof regardless of when we sample.
-        static uint s_arr = 0xFFFF, s_dest = 0xFFFF;
-        if ((uint)g_realbus->last_station_visited != s_arr) {
-            s_arr = (uint)g_realbus->last_station_visited;
-            if (s_arr != 0xFFFF)
-                ottd_log("R1 RV EVENT: ARRIVED st=%u x=%d y=%d state=%u",
-                         s_arr, (int)g_realbus->x_pos, (int)g_realbus->y_pos,
-                         (uint)g_realbus->state);
-        }
-        uint d = (uint)g_realbus->current_order.GetDestination();
-        if (d != s_dest) {
-            s_dest = d;
-            ottd_log("R1 RV EVENT: ORDER -> st=%u (type=%u) oi=%u/%u",
-                     d, (uint)g_realbus->current_order.GetType(),
-                     (uint)g_realbus->cur_real_order_index,
-                     (uint)g_realbus->GetNumOrders());
-        }
-        // R1-171: complete LOADING the R1 way. economy.cpp's LoadUnloadVehicle (which
-        // vanilla runs from CallVehicleTicks) is a later rung, so OT_LOADING would
-        // never finish and the bus would idle at the stop forever (R1-170: st=68
-        // spd=0 across every heartbeat). Board/alight through the SAME real-station
-        // economy the puppet fleet uses, dwell proportionally, then hand departure
-        // to the REAL order machinery: LeaveStation() frees the order and the
-        // controller + ProcessOrders drive off to the next station on their own.
-        static int s_rv_dwell = 0;
-        static unsigned s_rv_pax = 0;
-        if (g_realbus->current_order.IsType(OT_LOADING)) {
-            if (s_rv_dwell == 0) {
-                unsigned got = 0;
-                const Station *rst = Station::GetIfValid(g_realbus->last_station_visited);
-                if (rst != nullptr && rst->town != nullptr) {
-                    if (s_rv_pax > 0) {                       // alight + fare first
-                        r1_deliver_cargo(s_rv_pax, (unsigned)g_bus[0].len);
-                        s_rv_pax = 0;
-                    }
-                    got = r1_station_take_cargo((unsigned)rst->town->index, R1_BUS_CAP);
-                    s_rv_pax = got;
-                }
-                s_rv_dwell = 8 + (int)got;                    // proportional boarding pause
-            } else if (--s_rv_dwell == 0) {
-                // Vanilla's economy sets this flag when load/unload completes; the
-                // controller's own HandleLoading (RoadVehController each tick) then
-                // does LeaveStation AND IncrementImplicitOrderIndex. Calling
-                // LeaveStation directly skipped the advance — oi stuck at 0/2 and
-                // the bus shuttled to one station forever (R1-172 trace).
-                SetBit(g_realbus->vehicle_flags, VF_LOADING_FINISHED);
-                ottd_log("R1 RV EVENT: DEPART pax=%u", s_rv_pax);
-            }
-        }
-    }
-
     // Throttled liveness log: prove on the sink that the clock ticks + town grows.
     // First call confirms the hook fires; then every ~128 ticks show the town
     // climbing (houses/pop) and the calendar advancing (date_fract/year).
@@ -1331,13 +1342,22 @@ extern "C" void r1_tick(void)
     }
     if (n == 1 || (n & 0x7F) == 0) {
         const Town *t0 = Town::GetIfValid(0);
+        // R1-174: a REAL bus0 has frozen puppet fields; feed the liveness tuple from
+        // the vehicle the controller actually moves (i=tile-x, dir=facing,
+        // dwell=speed) so assert.py's "3 distinct states" keeps meaning "it moves".
+        int b0i = g_bus[0].i, b0dir = g_bus[0].dir, b0dwell = g_bus[0].dwell;
+        if (g_bus[0].real && g_bus[0].v != nullptr) {
+            b0i     = (int)(g_bus[0].v->x_pos / 16);
+            b0dir   = (int)g_bus[0].v->direction;
+            b0dwell = (int)((RoadVehicle *)g_bus[0].v)->cur_speed;
+        }
         ottd_log("R1: live wait0=%u tick=%u date=%d mon=%d houses=%u pop=%u ind=%u cargo=%lu stations=%u orders=%u | bus0 i=%d dir=%d len=%d dwell=%d",
                  r1_station_waiting(0),
                  n, (int)_date, (int)_cur_month,
                  t0 ? (uint)t0->cache.num_houses : 0u,
                  t0 ? (uint)t0->cache.population : 0u,
                  r1_industry_count(), r1_industry_stockpile(), r1_station_count(), r1_order_count(),
-                 g_bus[0].i, g_bus[0].dir, g_bus[0].len, g_bus[0].dwell);
+                 b0i, b0dir, g_bus[0].len, b0dwell);
         // R1-144 RUNG 2 liveness: the real-controller bus, straight off the Vehicle
         // fields the game maintains. st encodes RVSB state (0xFE = in depot).
         if (g_realbus != nullptr) {
