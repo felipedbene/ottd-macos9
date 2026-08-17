@@ -62,11 +62,26 @@ CMakeFiles/ottdr1.dir/macdir.c.obj: /Users/felipe/ottd-macos9/ottd-r1/macdir.c \
   /Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/include/time.h
 
 CMakeFiles/ottdr1.dir/r1main.c.obj: /Users/felipe/ottd-macos9/ottd-r1/r1main.c \
+  /Users/felipe/ottd-macos9/Retro68-build/toolchain/lib/gcc/powerpc-apple-macos/16.1.0/include/stdarg.h \
   /Users/felipe/ottd-macos9/Retro68-build/toolchain/lib/gcc/powerpc-apple-macos/16.1.0/include/stdbool.h \
   /Users/felipe/ottd-macos9/Retro68-build/toolchain/lib/gcc/powerpc-apple-macos/16.1.0/include/stddef.h \
   /Users/felipe/ottd-macos9/Retro68-build/toolchain/lib/gcc/powerpc-apple-macos/16.1.0/include/stdint.h \
   /Users/felipe/ottd-macos9/Retro68-build/toolchain/multiversal/CIncludes/Multiverse.h \
-  /Users/felipe/ottd-macos9/Retro68-build/toolchain/multiversal/CIncludes/Quickdraw.h
+  /Users/felipe/ottd-macos9/Retro68-build/toolchain/multiversal/CIncludes/Quickdraw.h \
+  /Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/include/_ansi.h \
+  /Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/include/_newlib_version.h \
+  /Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/include/machine/_default_types.h \
+  /Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/include/machine/_types.h \
+  /Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/include/machine/ieeefp.h \
+  /Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/include/newlib.h \
+  /Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/include/stdio.h \
+  /Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/include/sys/_types.h \
+  /Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/include/sys/cdefs.h \
+  /Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/include/sys/config.h \
+  /Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/include/sys/features.h \
+  /Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/include/sys/lock.h \
+  /Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/include/sys/reent.h \
+  /Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/include/sys/stdio.h
 
 
 /Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/include/time.h:
@@ -91,6 +106,8 @@ CMakeFiles/ottdr1.dir/r1main.c.obj: /Users/felipe/ottd-macos9/ottd-r1/r1main.c \
 
 /Users/felipe/ottd-macos9/Retro68-build/toolchain/multiversal/CIncludes/Files.h:
 
+/Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/include/stdio.h:
+
 /Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/include/machine/ieeefp.h:
 
 /Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/include/sys/reent.h:
@@ -114,6 +131,8 @@ CMakeFiles/ottdr1.dir/r1main.c.obj: /Users/felipe/ottd-macos9/ottd-r1/r1main.c \
 /Users/felipe/ottd-macos9/Retro68-build/toolchain/lib/gcc/powerpc-apple-macos/16.1.0/include/stddef.h:
 
 /Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/include/newlib.h:
+
+/Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/include/sys/stdio.h:
 
 /Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/include/sys/string.h:
 
@@ -144,6 +163,8 @@ CMakeFiles/ottdr1.dir/r1main.c.obj: /Users/felipe/ottd-macos9/ottd-r1/r1main.c \
 /Users/felipe/ottd-macos9/ottd-r1/r1main.c:
 
 /Users/felipe/ottd-macos9/ottd-b2/macsys.h:
+
+/Users/felipe/ottd-macos9/Retro68-build/toolchain/lib/gcc/powerpc-apple-macos/16.1.0/include/stdarg.h:
 
 /Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/include/sys/config.h:
 

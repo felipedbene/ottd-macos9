@@ -218,6 +218,7 @@ ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/viewport.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/void_cmd.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/widget.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/window.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/zz_marker.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/../ottd-b2/netlog.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/../ottd-b2/statsd_ot.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/../ottd-b2/aslm_stubs.o

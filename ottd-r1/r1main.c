@@ -17,10 +17,11 @@
 #include <Fonts.h>
 #include <Events.h>
 #include <MacMemory.h>
+#include <stdio.h>     /* R1-178: pre-main ctor probe (premain.txt) */
 
 /* Bumped every deploy so the sink trace unambiguously identifies which binary ran
  * (a stale previously-decoded app on the Mac produces confusingly identical traces). */
-#define B2_BUILD_TAG "R1-177"
+#define B2_BUILD_TAG "R1-179"
 
 /* ROOT-CAUSE FIX ATTEMPT for the intermittent static-init anomaly:
  * C++ static constructors (blitter/driver registries, factory std::strings)
@@ -93,6 +94,17 @@ extern void macdir_selftest(void);
 extern void macnet_selftest(void);
 extern void macnet_tcp_test(void);
 extern void macnet_tcp_accept_test(void);
+
+/* R1-178 Classic forensics: priority-101 ctor runs BEFORE the game's ~100 static
+ * ctors. If premain.txt appears where the app runs but main's log never does,
+ * the app IS starting and a LATER ctor kills it (the Classic silent-swallow);
+ * if even this never lands, death is in CFM prepare / runtime init. stdio here
+ * is newlib-safe pre-main (no Toolbox use). Remove after the hunt. */
+__attribute__((constructor(101))) static void r1_premain_probe(void)
+{
+    FILE *f = fopen("premain.txt", "w");
+    if (f != NULL) { fputs("ctors began\n", f); fclose(f); }
+}
 
 int main(void)
 {
