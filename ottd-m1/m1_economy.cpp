@@ -48,6 +48,10 @@ extern ClientSettings _settings_client;   /* gui.graph_line_thickness (R1-86 gra
  * "use the default sprite") is safe. */
 SpriteID GetCustomCargoSprite(const CargoSpec *) { return 0; }
 
+/* R1-176 rung 4: economy.cpp is now COMPILED (R1_REAL_ECONOMY). Everything it
+ * defines gets handed over — the guarded blocks below were the hand-rolled
+ * stand-ins from the rungs before it. */
+#ifndef R1_REAL_ECONOMY
 /* R1-80: real transported-goods income, copied from economy.cpp:977-1023 (that TU is the heavy
  * station/linkgraph/subsidy cascade we don't compile). The NewGRF CBM_CARGO_PROFIT_CALC branch
  * is DROPPED — our cargo never sets that callback, and keeping it would drag GetCargoCallback
@@ -76,19 +80,19 @@ Money GetTransportedGoodsIncome(uint num_pieces, uint dist, byte transit_days, C
 }
 
 /* Real Economy/Prices — replace the fake `char _economy[4096]`/`char _price[2048]` deadpools
- * (guarded out of m1_deadpools.c under R1_MERGE). Plain PODs; economy.cpp (which also defines
- * them) is NOT compiled, so no ODR clash. */
+ * (guarded out of m1_deadpools.c under R1_MERGE). Plain PODs; economy.cpp (compiled under
+ * R1_REAL_ECONOMY) is their real home now. */
 Economy _economy;
 Prices  _price;
 
-/* R1 rung-b: stand up the cargo-payment pool (brand-new symbol; economy.cpp / cargopacket.cpp are
- * not compiled, so no ODR clash). CleanPool odr-uses ~CargoPayment, so provide an EMPTY stub: the
- * simplified deliver path (r1_deliver_cargo, below) never ALLOCATES a CargoPayment — the pool is
- * always empty and there is nothing to finalize. This keeps the real ~CargoPayment (which drags the
- * Vehicle / cost-animation cascade) out of the fragile XCOFF link. */
+/* R1 rung-b: stand up the cargo-payment pool (handed to economy.cpp under R1_REAL_ECONOMY).
+ * CleanPool odr-uses ~CargoPayment, so provide an EMPTY stub: the simplified deliver path
+ * (r1_deliver_cargo, below) never ALLOCATES a CargoPayment — the pool is always empty and
+ * there is nothing to finalize. */
 CargoPaymentPool _cargo_payment_pool("CargoPayment");
 INSTANTIATE_POOL_METHODS(CargoPayment)
 CargoPayment::~CargoPayment() {}
+#endif  /* !R1_REAL_ECONOMY */
 
 /* Real one lives in company_cmd.cpp (uncompiled). The finance/company windows aren't open in
  * R1, and the R1InfoWindow repaints itself a few times/sec, so a no-op is fine. */
@@ -158,6 +162,12 @@ extern "C" void r1_daily_expenses()
 	_current_company = save;
 }
 
+/* R1-176: handed to economy.cpp's real CompaniesMonthlyLoop (statistics roll +
+ * CompaniesPayInterest + fluctuations). Note: the real loop also pays interest
+ * monthly while r1_daily_expenses (above) still charges the daily version — both
+ * flow through SubtractMoneyFromCompany, so the fin_invariant stays exact; the
+ * daily charge can be retired once the real loop is HW-proven. */
+#ifndef R1_REAL_ECONOMY
 /* Replaces the empty CompaniesMonthlyLoop stub (removed from m1_shims.cpp). R1-87: interest/upkeep
  * moved to the DAILY EnginesDailyLoop above (visible in short sessions); this loop now only does the
  * quarterly history roll for the graphs. Wired to fire monthly by the live OnNewMonth. */
@@ -180,6 +190,7 @@ void CompaniesMonthlyLoop()
 		SetWindowDirty(WC_INCOME_GRAPH, 0);
 	}
 }
+#endif  /* !R1_REAL_ECONOMY */
 
 /* R1 rung-b: the simplified DeliverGoods. Computes the fare for `pax` passengers carried `dist`
  * tiles via the real GetTransportedGoodsIncome (above), then credits COMPANY_FIRST through the real

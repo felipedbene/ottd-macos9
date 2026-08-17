@@ -734,9 +734,13 @@ void ShowCompanyLiveryWindow(CompanyID, GroupID) {}
 void SetObjectToPlaceWnd(CursorID, PaletteID, HighLightStyle, Window *) {}
 void SetTileSelectSize(int, int) {}
 void ShowNetworkCompanyPasswordWindow(Window *) {}
+/* R1-176: these three are handed to the real economy.cpp (R1_REAL_ECONOMY) —
+ * real company value (assets + money) and real share trading. */
+#ifndef R1_REAL_ECONOMY
 Money CalculateCompanyValue(const Company *c, bool) { return c->money; }
 CommandCost CmdBuyShareInCompany (DoCommandFlag, CompanyID) { return CommandCost(); }
 CommandCost CmdSellShareInCompany(DoCommandFlag, CompanyID) { return CommandCost(); }
+#endif  /* !R1_REAL_ECONOMY */
 CommandCost CmdGiveMoney         (DoCommandFlag, uint32, CompanyID) { return CommandCost(); }
 CommandCost CmdRenamePresident   (DoCommandFlag, const std::string &) { return CommandCost(); }
 CommandCost CmdRenameCompany     (DoCommandFlag, const std::string &) { return CommandCost(); }

@@ -22,7 +22,7 @@ TCLIB=/Users/felipe/ottd-macos9/Retro68-build/toolchain/powerpc-apple-macos/lib
 # symbol names (measured: ground_vehicle.o's _GLOBAL__F_..._0x<hash> differed on
 # every rebuild), so "same tree -> same binary" never held. A fixed seed is safe
 # here: every seeded name already embeds the TU's own path, so TUs can't collide.
-CXXFLAGS=(-std=c++17 -DNO_THREADS -DTTD_ENDIAN=TTD_BIG_ENDIAN -DR1_MERGE -DR1_STRINGS -DR1_REAL_VEHICLE_STACK -DNDEBUG -include "$COMPAT/libc_compat.h" -Os -frandom-seed=r1)
+CXXFLAGS=(-std=c++17 -DNO_THREADS -DTTD_ENDIAN=TTD_BIG_ENDIAN -DR1_MERGE -DR1_STRINGS -DR1_REAL_VEHICLE_STACK -DR1_REAL_ECONOMY -DNDEBUG -include "$COMPAT/libc_compat.h" -Os -frandom-seed=r1)
 INCS=(-I"$COMPAT" -I"$OTTD/src" -I"$OTTD/src/3rdparty" -I"$OTTD/src/3rdparty/squirrel/include" -I"$OTTD/src/script/api" -I"$GEN" -I"$GEN/script/api")
 
 # --- mtime gating -----------------------------------------------------------
@@ -54,8 +54,13 @@ up_to_date() {
 # NOTE: do NOT add cargopacket.cpp here. It drags in the CargoAction operators and
 # FlowStat and collides with the hand-rolled CargoPacket specializations in
 # m1_station.cpp -- measured: it makes the link surface worse, not better.
+# economy.cpp (R1-176 rung 4): measured surface was 1 game symbol
+# (_story_page_element_pool -> deadpool) + libstdc++-resolved EH runtime; the 11
+# hand-rolled duplicates moved behind #ifndef R1_REAL_ECONOMY. cargopacket.cpp
+# stays OUT (the warning above still holds); economy's cargo-list calls resolve
+# to m1_station.cpp's specializations.
 SRC_TUS=(roadveh_cmd.cpp vehicle.cpp engine.cpp order_cmd.cpp roadstop.cpp rail.cpp ground_vehicle.cpp \
-         core/pool_func.cpp town_cmd.cpp landscape.cpp clear_cmd.cpp road_cmd.cpp road_map.cpp void_cmd.cpp gfx_layout.cpp fontcache.cpp fontcache/spritefontcache.cpp tree_cmd.cpp townname.cpp widgets/dropdown.cpp toolbar_gui.cpp cargotype.cpp)
+         core/pool_func.cpp town_cmd.cpp landscape.cpp clear_cmd.cpp road_cmd.cpp road_map.cpp void_cmd.cpp gfx_layout.cpp fontcache.cpp fontcache/spritefontcache.cpp tree_cmd.cpp townname.cpp widgets/dropdown.cpp toolbar_gui.cpp cargotype.cpp economy.cpp)
 # viewport.cpp is compiled from a PATCHED copy (below): DoSetViewportPosition calls macsys_scroll
 # (windowport CopyBits + RAM memmove) instead of GfxScroll. GfxScroll's MakeDirty(retained) forced a
 # near-full CPU present and tore on OS9's single QuickDraw buffer; macsys_scroll scrolls the window
@@ -63,7 +68,7 @@ SRC_TUS=(roadveh_cmd.cpp vehicle.cpp engine.cpp order_cmd.cpp roadstop.cpp rail.
 # M1 support TUs (shims/stubs/pools) — engine-calibrated, minus the gfx-owned dups.
 # m1_viewport_stubs = no-op window/vehicle/sign surface viewport.cpp links against.
 # m1_text_stubs = the 4 symbols the real font/layout TUs need (config/utf8/glyphs).
-M1_TUS=(m1_shims m1_methods m1_pools m1_profiling_stub m1_town_stubs m1_cmd_stubs m1_land_stubs m1_road_stubs m1_viewport_stubs m1_text_stubs m1_world_stubs m1_water_draw m1_industry_draw m1_window_stubs m1_strings_stubs m1_toolbar_stubs m1_company m1_vehicle m1_economy m1_finance_gui m1_industry m1_depot m1_town_directory_gui m1_station m1_company_gui m1_station_gui m1_vehicle_list_gui m1_graph_gui m1_station_draw m1_order m1_pathfind m1_town_gui m1_industry_gui m1_smallmap_gui m1_subsidy_gui m1_rail_draw m1_train m1_realveh_stubs m1_rvstub_airsea m1_rvstub_group m1_rvstub_econ m1_rvstub_infra)
+M1_TUS=(m1_shims m1_ecostub m1_methods m1_pools m1_profiling_stub m1_town_stubs m1_cmd_stubs m1_land_stubs m1_road_stubs m1_viewport_stubs m1_text_stubs m1_world_stubs m1_water_draw m1_industry_draw m1_window_stubs m1_strings_stubs m1_toolbar_stubs m1_company m1_vehicle m1_economy m1_finance_gui m1_industry m1_depot m1_town_directory_gui m1_station m1_company_gui m1_station_gui m1_vehicle_list_gui m1_graph_gui m1_station_draw m1_order m1_pathfind m1_town_gui m1_industry_gui m1_smallmap_gui m1_subsidy_gui m1_rail_draw m1_train m1_realveh_stubs m1_rvstub_airsea m1_rvstub_group m1_rvstub_econ m1_rvstub_infra)
 
 # --- parallel compile --------------------------------------------------------
 # The 60 TUs are independent single `g++ -c src -o obj` calls, and they used to run

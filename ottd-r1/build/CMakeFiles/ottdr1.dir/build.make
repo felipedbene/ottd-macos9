@@ -149,6 +149,7 @@ ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/cargotype.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/clear_cmd.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/date.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/dropdown.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/economy.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/engine.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/fontcache.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/gfx_layout.o
@@ -160,6 +161,7 @@ ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_company_gui.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_deadpools.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_depot.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_economy.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_ecostub.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_finance_gui.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_graph_gui.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_industry.o

@@ -105,13 +105,10 @@ void SubtractMoneyFromCompanyFract(CompanyID company, const CommandCost &cst)
 
 /* ------------------------------------------------------------- the honest thirteen -- */
 
-/**
- * Real shape, from economy.cpp:961, minus the NewGRF branch. The price-base multipliers
- * only exist for cargo/vehicle GRFs, and this port loads no NewGRFs at all (only the base
- * graphics set), so grf_file is always nullptr on every path that reaches us — reading
- * GRFFile::price_base_multipliers would mean pulling in newgrf.h for a value that is
- * always zero. What is left is the plain scaled base price, which is the honest answer.
- */
+/* R1-176: GetPrice handed to the real economy.cpp (compiled under R1_REAL_ECONOMY).
+ * Its NewGRF branch reads grf_file->price_base_multipliers only when a GRF is
+ * loaded — always nullptr here, so behavior is identical. */
+#ifndef R1_REAL_ECONOMY
 Money GetPrice(Price index, uint cost_factor, const GRFFile *grf_file, int shift)
 {
 	if (index >= PR_END) return 0;
@@ -124,16 +121,19 @@ Money GetPrice(Price index, uint cost_factor, const GRFFile *grf_file, int shift
 	}
 	return cost;
 }
+#endif  /* !R1_REAL_ECONOMY */
 
 /* There is no link graph in this port (linkgraph/ is not compiled and no GoodsEntry ever
  * gets a node), so there are no edge capacities to raise. */
 void IncreaseStats(Station *, const Vehicle *, StationID, uint32) {}
 
-/* economy.cpp's load/unload state machine. R1 moves cargo by hand in m1_station.cpp and
- * pays for it through r1_deliver_cargo; letting the real machinery run alongside that would
- * double-count. Vehicle cargo lists stay empty and no vehicle ever enters LOADING. */
+/* R1-176: PrepareUnload/LoadUnloadStation handed to the real economy.cpp. The real
+ * pair runs only when something calls it — R1 still drives loading through the
+ * VF_LOADING_FINISHED bridge until the LoadUnloadStation wiring lands (step 2). */
+#ifndef R1_REAL_ECONOMY
 void PrepareUnload(Vehicle *) {}
 void LoadUnloadStation(Station *) {}
+#endif  /* !R1_REAL_ECONOMY */
 
 /* misc_gui.cpp's floating "-£123" text. It needs the text-effect pool and the string
  * system's DParam plumbing; the R1 viewport draws no text effects, so the money still
@@ -172,3 +172,30 @@ void CargoList<VehicleCargoList, CargoPacketList>::OnCleanPool()
 {
 	this->packets.clear();
 }
+
+/* ---- R1-176: economy.cpp's remaining leaf references ------------------------
+ * The first probe-compile surface (6 symbols) was measured on DESCRIPTOR undefs
+ * only; XCOFF references plain function calls through the `.name` text entry
+ * alone, so these ten only surfaced at link time. Lesson: measure `nm -u` with
+ * the dot-entries INCLUDED. */
+#include "texteff.hpp"
+#include "newgrf_airporttiles.h"
+#include "newgrf_industrytiles.h"
+#include "newgrf_industries.h"
+
+/* Cargo lists are permanently EMPTY in R1 (no CargoPacket is ever allocated;
+ * m1_station.cpp moves cargo by hand and pays via r1_deliver_cargo). The real
+ * load/unload machinery asking to move cargo therefore honestly moves zero. */
+template <> uint VehicleCargoList::Reassign<VehicleCargoList::MTA_DELIVER, VehicleCargoList::MTA_TRANSFER>(uint, TileOrStationID) { return 0; }
+template <> uint VehicleCargoList::Reassign<VehicleCargoList::MTA_DELIVER, VehicleCargoList::MTA_KEEP>(uint, TileOrStationID) { return 0; }
+uint VehicleCargoList::Unload(uint, StationCargoList *, CargoPayment *) { return 0; }
+uint StationCargoList::Load(uint, VehicleCargoList *, TileIndex, StationIDStack) { return 0; }
+
+/* No airports, no NewGRF industry callbacks/animations, no floating
+ * loading-percent text effects — all genuinely absent subsystems, not shortcuts. */
+void AirportAnimationTrigger(Station *, AirpAnimationTrigger, CargoID) {}
+TextEffectID ShowFillingPercent(int, int, int, uint8, StringID) { return INVALID_TE_ID; }
+void UpdateFillingPercent(TextEffectID, uint8, StringID) {}
+void IndustryProductionCallback(Industry *, int) {}
+bool StartStopIndustryTileAnimation(const Industry *, IndustryAnimationTrigger) { return false; }
+void TriggerIndustry(Industry *, IndustryTileTrigger) {}

@@ -54,6 +54,9 @@ char _price[2048]                = {0};
 #endif
 char _cheats[512]                = {0};
 char _house_mngr[4096]           = {0};
+/* R1-176: economy.cpp (now real) iterates StoryPage elements for company value;
+ * no story subsystem exists — a zeroed pool object reads as empty (items=0). */
+char _story_page_element_pool[8192] = {0};
 #ifndef R1_STRINGS  /* real strings.cpp owns the StringParameters _global_string_params */
 char _global_string_params[4096] = {0};
 #endif
