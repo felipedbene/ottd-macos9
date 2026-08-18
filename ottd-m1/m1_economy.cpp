@@ -155,9 +155,16 @@ extern "C" void r1_daily_expenses()
 		SubtractMoneyFromCompany(CommandCost(EXPENSES_PROPERTY, 2));   /* small daily property upkeep */
 	}
 	for (const Vehicle *v : Vehicle::Iterate()) {
-		if (v->type != VEH_ROAD) continue;
-		_current_company = v->owner;
-		SubtractMoneyFromCompany(CommandCost(EXPENSES_ROADVEH_RUN, 3));  /* per-bus daily running cost */
+		if (v->type == VEH_ROAD) {
+			_current_company = v->owner;
+			SubtractMoneyFromCompany(CommandCost(EXPENSES_ROADVEH_RUN, 3));  /* per-bus daily running cost */
+		} else if (v->type == VEH_TRAIN && v->Previous() == nullptr) {
+			/* RUNG 6: the REAL engine-spec annual running cost (Train::GetRunningCost
+			 * walks the consist and reads the real engine table), charged daily so
+			 * the finance window's Train Running Costs row populates. */
+			_current_company = v->owner;
+			SubtractMoneyFromCompany(CommandCost(EXPENSES_TRAIN_RUN, v->GetRunningCost() / 360 + 1));
+		}
 	}
 	_current_company = save;
 }
