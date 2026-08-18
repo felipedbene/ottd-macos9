@@ -1020,6 +1020,10 @@ static void r1_rung2_setup(void)
     // reached its first junction. YAPF is the entry point our BFS shim implements
     // (YapfRoadVehicleChooseTrack -> r1_road_path), so declare it.
     _settings_game.pf.pathfinder_for_roadvehs = VPF_YAPF;
+    // RUNG 6 phase B: same for trains — CheckReverseTrain NOT_REACHEDs on the
+    // zeroed setting (measured R1-196 QEMU). The "YAPF" calls land in the
+    // m1_trainstub shims, exactly like the road ones land in m1_realveh_stubs.
+    _settings_game.pf.pathfinder_for_trains = VPF_YAPF;
 
     // R1-175 rung 3, iteration B: the WHOLE fleet converts to the real controller
     // (bus0 proved the path as R1-174, 12/12). Two buses share a corner station
@@ -1095,7 +1099,11 @@ static void r1_real_bus_tick(R1Bus &b, bool log_events)
 // ===== R1-104: a real TRAIN on real MP_RAILWAY track =====
 // A straight rail line laid on clear grass; one real pooled Train ping-pongs along it (hand-driven,
 // like the bus). ViewportAddVehicles below draws it for free (it iterates the whole vehicle pool).
-struct R1Train { TileIndex route[48]; int len, i, prog, dir; unsigned long last_ticks, accum; Vehicle *v; bool real; };
+struct R1Train {
+    TileIndex route[48]; int len, i, prog, dir; unsigned long last_ticks, accum; Vehicle *v; bool real;
+    int rv_dwell; unsigned rv_pax;         // RUNG 6 phase B: loading bridge state (mirrors R1Bus)
+    unsigned st_a, st_b;                   // platform StationIDs (a = near depot, b = far)
+};
 static R1Train g_train;
 
 // Lay a straight horizontal rail line (x0..x1 at row y) on CLEAR tiles; remember the tiles.
@@ -1124,6 +1132,21 @@ static void r1_lay_rail_line(int x0, int x1, int y)
 //     ping-pong. Stations + orders arrive with the next step.
 extern "C" int r1_first_rail_engine(void);                   // m1_vehicle.cpp
 extern "C" unsigned r1_make_rail_depot(unsigned tile, int dir);  // m1_depot.cpp
+extern "C" void r1_place_rail_station(unsigned tile, unsigned station_index, int axis);  // m1_station_draw.cpp
+
+// Nearest town's StationID for a tile (Manhattan over the town pool), excluding
+// `exclude_st` so the two platforms land on DIFFERENT stations. 0xFFFF if none.
+static unsigned r1_nearest_town_station(TileIndex tile, unsigned exclude_st)
+{
+    unsigned best = 0xFFFF; uint best_d = UINT_MAX;
+    for (const Town *tn : Town::Iterate()) {
+        unsigned sid = r1_town_station_index((unsigned)tn->index);
+        if (sid == 0xFFFF || sid == exclude_st) continue;
+        uint d = DistanceManhattan(tile, tn->xy);
+        if (d < best_d) { best_d = d; best = sid; }
+    }
+    return best;
+}
 
 static bool r1_make_real_train(void)
 {
@@ -1140,6 +1163,27 @@ static bool r1_make_real_train(void)
     unsigned depot_id = r1_make_rail_depot((unsigned)dt, (int)exit_dir);
     if (depot_id == 0xFFFF) { ottd_log("R1-RUNG6: depot pool refused"); return false; }
 
+    // Phase B: two rail platforms on FLAT line tiles (a sloped platform would
+    // need the halftile machinery), joined to the nearest towns' stations so
+    // the existing cargo pool / fares / HUD serve rail for free. First flat
+    // tile scanning in from each end; must be distinct stations, 3+ tiles apart.
+    t.st_a = t.st_b = 0xFFFF;
+    int pa = -1, pb = -1;
+    for (int k = 2; k < t.len - 2; k++)  if (GetTileSlope(t.route[k]) == SLOPE_FLAT) { pa = k; break; }
+    for (int k = t.len - 3; k > pa + 2; k--) if (GetTileSlope(t.route[k]) == SLOPE_FLAT) { pb = k; break; }
+    if (pa > 0 && pb > pa + 2) {
+        unsigned sa = r1_nearest_town_station(t.route[pa], 0xFFFF);
+        unsigned sb = r1_nearest_town_station(t.route[pb], sa);
+        if (sa != 0xFFFF && sb != 0xFFFF) {
+            r1_place_rail_station((unsigned)t.route[pa], sa, 0 /* AXIS_X */);
+            r1_place_rail_station((unsigned)t.route[pb], sb, 0);
+            t.st_a = sa; t.st_b = sb;
+            ottd_log("R1-RUNG6B: platforms at x=%d (st=%u) and x=%d (st=%u)",
+                     (int)TileX(t.route[pa]), sa, (int)TileX(t.route[pb]), sb);
+        }
+    }
+    if (t.st_a == 0xFFFF) ottd_log("R1-RUNG6B: no usable platform sites — train will roam unwaged");
+
     CompanyID save_co = _current_company;
     _current_company = COMPANY_FIRST;
     Vehicle *veh = nullptr;
@@ -1149,10 +1193,16 @@ static bool r1_make_real_train(void)
 
     Train *tv = (Train *)veh;
     tv->ConsistChanged(CCF_TRACK);            // real cache pass (power/weight/speed)
+    // Orders: far platform first (the depot sits at the line head next to st_a),
+    // then home — the same two-stop loop the buses run. Without platforms the
+    // train just roams the line (phase A behaviour).
+    if (t.st_a != 0xFFFF && t.st_b != 0xFFFF) r1_attach_bus_orders(veh, t.st_b, t.st_a);
     veh->vehstatus &= ~VS_STOPPED;            // release: Tick()'s depot logic takes over
 
     t.v = veh;
     t.real = true;
+    t.rv_dwell = 0;
+    t.rv_pax = 0;
     ottd_log("R1-RUNG6: train REAL unit=%u engine=%d depot=(%d,%d) exit=%d maxspd=%u power=%u",
              (uint)veh->unitnumber, eng, (int)TileX(dt), (int)TileY(dt), (int)exit_dir,
              (uint)tv->vcache.cached_max_speed, (uint)tv->gcache.cached_power);
@@ -1416,6 +1466,34 @@ extern "C" void r1_tick(void)
     // R1-104/RUNG 6: real train runs the real controller; puppet keeps the hand-mover.
     if (g_train.real && g_train.v != nullptr) {
         g_train.v->Tick();
+        // RUNG 6 phase B loading bridge — the identical shape r1_real_bus_tick
+        // uses: R1 cargo moves + dwell, then the REAL LoadUnloadStation finishes
+        // the stop (CargoPayment fare, VF_LOADING_FINISHED -> HandleLoading
+        // departs and advances the order).
+        {
+            Train *tv = (Train *)g_train.v;
+            if (tv->current_order.IsType(OT_LOADING)) {
+                if (g_train.rv_dwell == 0) {
+                    unsigned got = 0;
+                    const Station *rst = Station::GetIfValid(tv->last_station_visited);
+                    if (rst != nullptr && rst->town != nullptr) {
+                        if (g_train.rv_pax > 0) {
+                            r1_deliver_cargo(g_train.rv_pax, (unsigned)g_train.len);
+                            g_train.rv_pax = 0;
+                        }
+                        got = r1_station_take_cargo((unsigned)rst->town->index, 40 /* train load */);
+                        g_train.rv_pax = got;
+                    }
+                    g_train.rv_dwell = 10 + (int)got;
+                    ottd_log("R1 TRAIN EVENT: LOADING st=%u board=%u", (uint)tv->last_station_visited, got);
+                } else if (--g_train.rv_dwell == 0) {
+                    Station *st = Station::GetIfValid(tv->last_station_visited);
+                    if (st != nullptr) LoadUnloadStation(st);
+                    else SetBit(tv->vehicle_flags, VF_LOADING_FINISHED);
+                    ottd_log("R1 TRAIN EVENT: DEPART pax=%u", g_train.rv_pax);
+                }
+            }
+        }
         static unsigned rtn = 0;
         if ((++rtn & 511) == 1) {
             const Train *tv = (const Train *)g_train.v;

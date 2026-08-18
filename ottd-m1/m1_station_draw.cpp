@@ -36,6 +36,8 @@
 #include "station_base.h"      /* Station::GetIfValid (R1-164: link the stop into the chain) */
 #include "roadstop_base.h"     /* RoadStop pool object at the stop tile */
 #include "roadveh.h"           /* RoadVehicle, RVSB_* (R1-168: real stop entry proc) */
+#include "train.h"             /* Train, GetTrainStopLocation (rung 6 phase B) */
+#include "newgrf_station.h"    /* IsStationTileBlocked declaration */
 #include "track_func.h"        /* IsReversingRoadTrackdir */
 
 extern "C" void ottd_log(const char *fmt, ...);   /* netlog tee (sink + file) */
@@ -78,6 +80,23 @@ static const R1SeqLine _r1_stop_shelter[2][2] = {
 
 static void DrawTile_Station(TileInfo *ti)
 {
+	/* RUNG 6 phase B: rail platform tile — leveled foundation on slopes, the
+	 * through track, and the classic platform edge pair (rear + front). */
+	if (HasStationRail(ti->tile)) {
+		if (ti->tileh != SLOPE_FLAT) DrawFoundation(ti, FOUNDATION_LEVELED);
+		bool x_axis = GetRailStationAxis(ti->tile) == AXIS_X;
+		DrawGroundSprite(x_axis ? SPR_RAIL_TRACK_X : SPR_RAIL_TRACK_Y, PAL_NONE);
+		PaletteID ppal = GENERAL_SPRITE_COLOUR(COLOUR_GREY);
+		if (x_axis) {
+			AddSortableSpriteToDraw(SPR_RAIL_PLATFORM_X_REAR,  ppal, ti->x,     ti->y,      16,  5, 2, ti->z);
+			AddSortableSpriteToDraw(SPR_RAIL_PLATFORM_X_FRONT, ppal, ti->x,     ti->y + 11, 16,  5, 2, ti->z);
+		} else {
+			AddSortableSpriteToDraw(SPR_RAIL_PLATFORM_Y_REAR,  ppal, ti->x,      ti->y,      5, 16, 2, ti->z);
+			AddSortableSpriteToDraw(SPR_RAIL_PLATFORM_Y_FRONT, ppal, ti->x + 11, ti->y,      5, 16, 2, ti->z);
+		}
+		return;
+	}
+
 	/* Drive-through bus stop: StationGfx (m5) is GFX_TRUCK_BUS_DRIVETHROUGH_OFFSET (4) + Axis,
 	 * so bit 0 of the gfx is the road Axis (0 = AXIS_X, 1 = AXIS_Y). See MakeDriveThroughRoadStop. */
 	Axis axis = (Axis)(GetStationGfx(ti->tile) & 1);
@@ -96,12 +115,19 @@ static void DrawTile_Station(TileInfo *ti)
 
 static int GetSlopePixelZ_Station(TileIndex tile, uint x, uint y)
 {
-	return 0;   // our world is flat at height 0
+	/* RUNG 6 phase B: real terrain z, leveled (station tiles always sit on a
+	 * flat surface — mirrors station_cmd's GetSlopePixelZ_Station). The old
+	 * `return 0` was another flat-world relic: it would sink a train at the
+	 * platform exactly like the rail proc's did on the open line. */
+	int z;
+	Slope tileh = GetTilePixelSlope(tile, &z);
+	if (tileh != SLOPE_FLAT) z += TILE_HEIGHT;   /* leveled foundation top */
+	return z;
 }
 
 static Foundation GetFoundation_Station(TileIndex tile, Slope tileh)
 {
-	return FOUNDATION_NONE;
+	return FlatteningFoundation(tileh);
 }
 
 static CommandCost ClearTile_Station(TileIndex tile, DoCommandFlag flags)
@@ -139,6 +165,10 @@ static TrackStatus GetTileTrackStatus_Station(TileIndex tile, TransportType mode
 				trackbits = AxisToTrackBits(axis);
 			}
 		}
+	} else if (mode == TRANSPORT_RAIL && HasStationRail(tile) && !IsStationTileBlocked(tile)) {
+		/* RUNG 6 phase B: rail platforms are track (the rail twin of the road
+		 * branch above — the same `return 0` here would be a trackless wall). */
+		trackbits = TrackToTrackBits(GetRailStationTrack(tile));
 	}
 
 	return CombineTrackStatus(TrackBitsToTrackdirBits(trackbits), TRACKDIR_BIT_NONE);
@@ -154,9 +184,42 @@ static CommandCost TerraformTile_Station(TileIndex tile, DoCommandFlag flags, in
  * STRAIGHT THROUGH its stop: no RoadStop::Enter, no bay, no state change, no
  * arrival — and then orbited the block forever chasing the unsatisfied order
  * (R1-166/167 traces). Trains stay out: the cosmetic train never stops. */
-static VehicleEnterTileStatus R1VehicleEnter_Station(Vehicle *v, TileIndex tile, int, int)
+static VehicleEnterTileStatus R1VehicleEnter_Station(Vehicle *v, TileIndex tile, int x, int y)
 {
-	if (v->type == VEH_ROAD) {
+	if (v->type == VEH_TRAIN) {
+		/* RUNG 6 phase B: the VEH_TRAIN branch of the real VehicleEnter_Station
+		 * (station_cmd.cpp:3295), verbatim — slows the train toward the platform
+		 * stop point and fires VETSB_ENTERED_STATION -> TrainEnterStation ->
+		 * BeginLoading at the exact stop location. */
+		StationID station_id = GetStationIndex(tile);
+		if (!v->current_order.ShouldStopAtStation(v, station_id)) return VETSB_CONTINUE;
+		if (!IsRailStation(tile) || !v->IsFrontEngine()) return VETSB_CONTINUE;
+
+		int station_ahead;
+		int station_length;
+		int stop = GetTrainStopLocation(station_id, tile, Train::From(v), &station_ahead, &station_length);
+
+		if (stop + station_ahead - (int)TILE_SIZE >= station_length) return VETSB_CONTINUE;
+
+		DiagDirection dir = DirToDiagDir(v->direction);
+
+		x &= 0xF;
+		y &= 0xF;
+
+		if (DiagDirToAxis(dir) != AXIS_X) Swap(x, y);
+		if (y == TILE_SIZE / 2) {
+			if (dir != DIAGDIR_SE && dir != DIAGDIR_SW) x = TILE_SIZE - 1 - x;
+			stop &= TILE_SIZE - 1;
+
+			if (x == stop) {
+				return VETSB_ENTERED_STATION | (VehicleEnterTileStatus)(station_id << VETS_STATION_ID_OFFSET);
+			} else if (x < stop) {
+				v->vehstatus |= VS_TRAIN_SLOWING;
+				uint16 spd = std::max(0, (stop - x) * 20 - 15);
+				if (spd < v->cur_speed) v->cur_speed = spd;
+			}
+		}
+	} else if (v->type == VEH_ROAD) {
 		RoadVehicle *rv = RoadVehicle::From(v);
 		static int s_enter_logs = 0;
 		if (s_enter_logs < 12) {
@@ -242,4 +305,34 @@ extern "C" void r1_place_bus_stop(unsigned tile, unsigned station_index, int axi
 		while (*tail != nullptr) tail = &(*tail)->next;
 		*tail = rs;
 	}
+}
+
+/* ============================================================================
+ * RUNG 6 phase B: write a REAL MP_STATION rail platform tile and attach it to
+ * an EXISTING town Station (a Station may have spread-out parts, so the rail
+ * halt joins the town's bus station: same cargo pool, same fares, same HUD).
+ *   tile          — plain-rail line tile to convert (its X/Y track is kept).
+ *   station_index — owning Station::index (see r1_town_station_index).
+ *   axis          — 0 = AXIS_X platform (line runs SW<->NE), 1 = AXIS_Y.
+ * Mirrors what CmdBuildRailStation leaves behind for a 1x1 platform: the map
+ * tile (section 0), the train_station TileArea and FACIL_TRAIN.
+ * ============================================================================ */
+extern "C" void r1_place_rail_station(unsigned tile, unsigned station_index, int axis)
+{
+	TileIndex t = (TileIndex)tile;
+	if (t >= MapSize()) return;
+	if (IsTileType(t, MP_VOID)) return;
+
+	Station *st = Station::GetIfValid((StationID)station_index);
+	if (st == nullptr) return;
+
+	MakeRailStation(t, _local_company, (StationID)station_index,
+	                (Axis)(((unsigned)axis) & 1), 0 /* section */, (RailType)0);
+	MarkTileDirtyByTile(t);
+
+	/* Each R1 station carries exactly ONE 1x1 platform (tile_area.cpp is not
+	 * linked, so no TileArea::Add; and the zeroed pool leaves train_station.tile
+	 * at 0, not INVALID_TILE, so an emptiness test would lie anyway). */
+	st->train_station = TileArea(t, 1, 1);
+	st->facilities |= FACIL_TRAIN;
 }
