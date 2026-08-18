@@ -2926,6 +2926,11 @@ static void MouseLoop(MouseClick click, int mousewheel)
 	_cursor.v_wheel = 0;
 }
 
+/* Mac OS 9 port: hoisted out of HandleMouseEvents — xcofflink lost this
+ * static's allocation when the R1 link layout shifted (caught by the
+ * post-link weak-static audit; the bug hits strong-function locals too). */
+static R1SteadyClock::time_point _double_click_time = {};
+
 /**
  * Handle a mouse event from the video driver
  */
@@ -2943,19 +2948,18 @@ void HandleMouseEvents()
 		InvalidateWindowData(WC_SPRITE_ALIGNER, 0, 1);
 	}
 
-	static R1SteadyClock::time_point double_click_time = {};
 	static Point double_click_pos = {0, 0};
 
 	/* Mouse event? */
 	MouseClick click = MC_NONE;
 	if (_left_button_down && !_left_button_clicked) {
 		click = MC_LEFT;
-		if (R1SteadyClock::now() <= double_click_time + TIME_BETWEEN_DOUBLE_CLICK &&
+		if (R1SteadyClock::now() <= _double_click_time + TIME_BETWEEN_DOUBLE_CLICK &&
 				double_click_pos.x != 0 && abs(_cursor.pos.x - double_click_pos.x) < MAX_OFFSET_DOUBLE_CLICK  &&
 				double_click_pos.y != 0 && abs(_cursor.pos.y - double_click_pos.y) < MAX_OFFSET_DOUBLE_CLICK) {
 			click = MC_DOUBLE_LEFT;
 		}
-		double_click_time = R1SteadyClock::now();
+		_double_click_time = R1SteadyClock::now();
 		double_click_pos = _cursor.pos;
 		_left_button_clicked = true;
 		_input_events_this_tick++;

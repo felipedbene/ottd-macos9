@@ -204,6 +204,7 @@ ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_town_directory_gui.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_town_gui.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_town_stubs.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_train.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_trainstub.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_vehicle.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_vehicle_list_gui.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_viewport_stubs.o
@@ -225,6 +226,7 @@ ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/sz_mark.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/toolbar_gui.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/town_cmd.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/townname.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/train_cmd.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/tree_cmd.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/vehicle.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/viewport.o

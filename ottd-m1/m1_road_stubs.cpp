@@ -95,11 +95,14 @@ void ShowDepotWindow(TileIndex, VehicleType) {}
 void VehicleEnterDepot(Vehicle *) {}
 #endif
 
-/* ---- rail-crossing / rail ---- */
+/* ---- rail-crossing / rail ----
+ * R1_REAL_TRAIN_STACK: train_cmd.cpp defines the real four. */
+#ifndef R1_REAL_TRAIN_STACK
 void UpdateLevelCrossing(TileIndex, bool, bool) {}
 void MarkDirtyAdjacentLevelCrossingTiles(TileIndex, Axis) {}
 void UpdateAdjacentLevelCrossingTilesOnLevelCrossingRemoval(TileIndex, Axis) {}
 bool TrainOnCrossing(TileIndex) { return false; }
+#endif /* !R1_REAL_TRAIN_STACK */
 CommandCost CmdRemoveSingleRail(DoCommandFlag, TileIndex, Track) { return CommandCost(); }
 
 /* ---- yapf ---- */

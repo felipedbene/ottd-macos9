@@ -45,7 +45,13 @@ static const SpriteID R1_TRAIN_SPRITE_BASE = 0x0B59;
 /* Train vtable: MarkDirty (first out-of-line virtual) is the key function, so defining
  * these here emits the Train vtable + typeinfo. Every out-of-line override in train.h gets
  * a minimal body; train_cmd.cpp (their real home) is NOT compiled, so no ODR clash.
- * Movement/rendering are hand-driven in r1_scene.cpp, so none of these run on the hot path. */
+ * Movement/rendering are hand-driven in r1_scene.cpp, so none of these run on the hot path.
+ * R1_REAL_TRAIN_STACK (rung 5): train_cmd.cpp IS compiled — its real definitions own the
+ * vtable, so everything down to (and including) the two GroundVehicle<Train> template
+ * specialisations is guarded out. r1_make_train survives (train_cmd has no factory).
+ * The CargoChanged guard is load-bearing beyond the dup: a strong no-op here would
+ * SHADOW ground_vehicle.o's weak real one — the exact bug that froze the rung-2 bus. */
+#ifndef R1_REAL_TRAIN_STACK
 void      Train::MarkDirty() {}
 void      Train::UpdateDeltaXY() {}
 void      Train::PlayLeaveStationSound(bool) const {}
@@ -69,6 +75,7 @@ template <> bool GroundVehicle<Train, VEH_TRAIN>::IsChainInDepot() const { retur
 /* Ground-vehicle cache recompute for the Train instantiation (mirrors the RoadVehicle
  * one in m1_road_stubs.cpp; again a distinct template instantiation). */
 template <> void GroundVehicle<Train, VEH_TRAIN>::CargoChanged() {}
+#endif /* !R1_REAL_TRAIN_STACK */
 
 /* Stand up ONE real train in the pool. Fields set for a valid, VISIBLE, renderable
  * vehicle; the pool is zeroed, so everything else (hashes, orders, caches) stays zeroed

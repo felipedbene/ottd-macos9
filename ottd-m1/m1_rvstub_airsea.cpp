@@ -113,7 +113,9 @@ void Ship::UpdateDeltaXY()
 
 /* Recomputing a consist means walking the articulated/multihead chain and asking
  * NewGRF for lengths and capacities — all of which lives in train_cmd.cpp. The R1
- * train is a single cosmetic unit whose cache is set once at creation. */
+ * train is a single cosmetic unit whose cache is set once at creation.
+ * R1_REAL_TRAIN_STACK: train_cmd.cpp provides both for real. */
+#ifndef R1_REAL_TRAIN_STACK
 void Train::ConsistChanged(ConsistChangeFlags)
 {
 }
@@ -123,3 +125,4 @@ CommandCost CmdReverseTrainDirection(DoCommandFlag, VehicleID, bool)
 {
 	return CMD_ERROR;
 }
+#endif /* !R1_REAL_TRAIN_STACK */
