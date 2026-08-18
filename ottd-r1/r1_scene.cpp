@@ -1126,9 +1126,27 @@ static void r1_train_move(int mult)
     int dx = (int)TileX(b) - ax, dy = (int)TileY(b) - ay;
     int wx = ax * TILE_SIZE + TILE_SIZE / 2 + dx * t.prog;
     int wy = ay * TILE_SIZE + TILE_SIZE / 2 + dy * t.prog;
-    int wz = (int)TileHeight(a) * TILE_HEIGHT;
+    // Ride the track surface (terrain + rail foundation), not the tile's raw
+    // north-corner height — the old form sank the train inside hillsides on
+    // the organic terrain (R1-190 glitch: invisible train + ghost trail).
+    int wz = GetSlopePixelZ(wx, wy);
     Direction dir = (dx > 0) ? DIR_SW : (dx < 0) ? DIR_NE : (dy > 0) ? DIR_SE : DIR_NW;
-    if (t.v == nullptr) { t.v = (Vehicle *)r1_make_train((uint)a, wx, wy, wz, (int)dir); return; }
+    if (t.v == nullptr) {
+        t.v = (Vehicle *)r1_make_train((uint)a, wx, wy, wz, (int)dir);
+        ottd_log("R1 TRAIN: make -> %s", t.v != nullptr ? "OK" : "NULL");
+        return;
+    }
+    // R1-190 glitch forensics: the lamp shows a ghost trail + a frozen train
+    // on the real-train-stack build. Log the live state every ~512 moves.
+    {
+        static unsigned tn = 0;
+        if ((++tn & 511) == 1)
+            ottd_log("R1 TRAIN: i=%d dir=%d prog=%d v=%p vs=0x%x spr=%u coord=(%d,%d,%d,%d) cand=%d",
+                     t.i, t.dir, t.prog, (void *)t.v, (unsigned)t.v->vehstatus,
+                     (unsigned)t.v->sprite_cache.sprite_seq.seq[0].sprite,
+                     (int)t.v->coord.left, (int)t.v->coord.top, (int)t.v->coord.right, (int)t.v->coord.bottom,
+                     (int)t.v->sprite_cache.is_viewport_candidate);
+    }
     t.v->x_pos = wx; t.v->y_pos = wy; t.v->z_pos = wz; t.v->direction = dir;
     t.v->sprite_cache.sprite_seq.Set((SpriteID)(0x0B59 + dir));
 #ifdef R1_REAL_VEHICLE_STACK

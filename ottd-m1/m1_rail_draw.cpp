@@ -36,24 +36,56 @@
 #include "table/strings.h"
 #include "table/sprites.h"
 
+/* rail_cmd.cpp's _track_sloped_sprites: offset from SPR_RAIL_TRACK_Y for
+ * track drawn on a (foundation-adjusted) non-flat slope, indexed tileh-1. */
+static const byte _r1_track_sloped_sprites[14] = {
+	14, 15, 22, 13,
+	 0, 21, 17, 12,
+	23,  0, 18, 20,
+	19, 16
+};
+
+/* GetRailFoundation reduced to the straight X/Y pieces R1 lays (no junction,
+ * halftile or overlap cases). Natural ramps along the axis carry sloped track
+ * with no foundation; a single raised corner gets an inclined foundation;
+ * everything else is leveled. The R1-104 flat-world drawer ignored slope
+ * entirely — on the organic terrain that cut the line flat through hillsides
+ * and (via get_slope_z_proc returning 0) sank the train INTO the hill. */
+static Foundation GetFoundation_Rail(TileIndex tile, Slope tileh)
+{
+	if (tileh == SLOPE_FLAT) return FOUNDATION_NONE;
+	bool x_piece = (GetTrackBits(tile) & TRACK_BIT_X) != 0;
+	if (!IsSteepSlope(tileh)) {
+		if (x_piece  && (tileh == SLOPE_NE || tileh == SLOPE_SW)) return FOUNDATION_NONE;
+		if (!x_piece && (tileh == SLOPE_NW || tileh == SLOPE_SE)) return FOUNDATION_NONE;
+		if (IsSlopeWithOneCornerRaised(tileh)) return x_piece ? FOUNDATION_INCLINED_X : FOUNDATION_INCLINED_Y;
+		return FOUNDATION_LEVELED;
+	}
+	return x_piece ? FOUNDATION_INCLINED_X : FOUNDATION_INCLINED_Y;
+}
+
 static void DrawTile_Rail(TileInfo *ti)
 {
-	/* Only straight single-track pieces exist in our flat world: a Y piece
-	 * (SW<->NE... i.e. along the Y axis) or an X piece. Pick the classic
-	 * combined track+ground sprite. Default to Y if anything unexpected. */
 	TrackBits track = GetTrackBits(ti->tile);
-	SpriteID image = (track & TRACK_BIT_X) ? SPR_RAIL_TRACK_X : SPR_RAIL_TRACK_Y;
+	Foundation f = GetFoundation_Rail(ti->tile, ti->tileh);
+	if (f != FOUNDATION_NONE) DrawFoundation(ti, f);   /* adjusts ti->tileh/ti->z */
+	SpriteID image;
+	if (ti->tileh != SLOPE_FLAT) {
+		image = SPR_RAIL_TRACK_Y + _r1_track_sloped_sprites[ti->tileh - 1];
+	} else {
+		image = (track & TRACK_BIT_X) ? SPR_RAIL_TRACK_X : SPR_RAIL_TRACK_Y;
+	}
 	DrawGroundSprite(image, PAL_NONE);
 }
 
+/* Mirror of rail_cmd's GetSlopePixelZ_Track: real terrain z + foundation. */
 static int GetSlopePixelZ_Rail(TileIndex tile, uint x, uint y)
 {
-	return 0;   // our world is flat at height 0
-}
-
-static Foundation GetFoundation_Rail(TileIndex tile, Slope tileh)
-{
-	return FOUNDATION_NONE;
+	int z;
+	Slope tileh = GetTilePixelSlope(tile, &z);
+	if (tileh == SLOPE_FLAT) return z;
+	z += ApplyPixelFoundationToSlope(GetFoundation_Rail(tile, tileh), &tileh);
+	return z + GetPartialPixelZ(x & 0xF, y & 0xF, tileh);
 }
 
 static CommandCost ClearTile_Rail(TileIndex tile, DoCommandFlag flags)
