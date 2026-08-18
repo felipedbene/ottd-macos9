@@ -188,6 +188,7 @@ ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_pathfind.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_pools.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_profiling_stub.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_rail_draw.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_railnet.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_railtypes.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_realveh_stubs.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_road_stubs.o

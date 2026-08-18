@@ -1139,6 +1139,7 @@ extern "C" unsigned r1_make_rail_depot(unsigned tile, int dir);  // m1_depot.cpp
 extern "C" void r1_place_rail_station(unsigned tile, unsigned station_index, int axis);  // m1_station_draw.cpp
 extern "C" void r1_place_rail_bits(unsigned tile, unsigned bits);   // m1_rail_draw.cpp (RUNG 7 junction)
 extern "C" int  r1_attach_orders(void *vehicle, const unsigned *stations, int n);  // m1_order.cpp
+extern "C" int  r1_build_rail_network(const unsigned *seed, int nseed, unsigned depot_tile, unsigned *out_st, int max_st);  // m1_railnet.cpp
 
 // Nearest town's StationID for a tile (Manhattan over the town pool), excluding
 // `exclude_st` so the two platforms land on DIFFERENT stations. 0xFFFF if none.
@@ -1171,60 +1172,17 @@ static bool r1_make_real_train(void)
     t.depot_id = depot_id;
     t.pending_wagons = 0;
 
-    // Phase B: two rail platforms on FLAT line tiles (a sloped platform would
-    // need the halftile machinery), joined to the nearest towns' stations so
-    // the existing cargo pool / fares / HUD serve rail for free. First flat
-    // tile scanning in from each end; must be distinct stations, 3+ tiles apart.
-    t.st_a = t.st_b = 0xFFFF;
-    int pa = -1, pb = -1;
-    for (int k = 2; k < t.len - 2; k++)  if (GetTileSlope(t.route[k]) == SLOPE_FLAT) { pa = k; break; }
-    for (int k = t.len - 3; k > pa + 2; k--) if (GetTileSlope(t.route[k]) == SLOPE_FLAT) { pb = k; break; }
-    if (pa > 0 && pb > pa + 2) {
-        unsigned sa = r1_nearest_town_station(t.route[pa], 0xFFFF);
-        unsigned sb = r1_nearest_town_station(t.route[pb], sa);
-        if (sa != 0xFFFF && sb != 0xFFFF) {
-            r1_place_rail_station((unsigned)t.route[pa], sa, 0 /* AXIS_X */);
-            r1_place_rail_station((unsigned)t.route[pb], sb, 0);
-            t.st_a = sa; t.st_b = sb;
-            ottd_log("R1-RUNG6B: platforms at x=%d (st=%u) and x=%d (st=%u)",
-                     (int)TileX(t.route[pa]), sa, (int)TileX(t.route[pb]), sb);
-        }
-    }
-    if (t.st_a == 0xFFFF) ottd_log("R1-RUNG6B: no usable platform sites — train will roam unwaged");
-
-    // RUNG 7: grow the line into a NETWORK — a 3-way junction mid-line and a
-    // Y-axis branch running SE to a third town's halt. Junction bits X|RIGHT|
-    // LOWER connect BOTH main-line directions to the branch, so the BFS
-    // pathfinder has a genuine routing decision at every approach.
-    t.st_c = 0xFFFF;
-    if (t.st_a != 0xFFFF) {
-        for (int j = t.len - 3; j >= 3 && t.st_c == 0xFFFF; j--) {
-            TileIndex jt = t.route[j];
-            if (GetTileSlope(jt) != SLOPE_FLAT) continue;
-            TileIndex corridor[7];
-            int clear = 0;
-            for (int k = 1; k <= 6; k++) {
-                if (TileY(jt) + k >= MapMaxY()) break;
-                TileIndex n = TileXY(TileX(jt), TileY(jt) + k);
-                if (!IsTileType(n, MP_CLEAR)) break;
-                corridor[clear++] = n;
-            }
-            if (clear < 4) continue;
-            int pi = -1;
-            for (int k = clear - 1; k >= 2; k--)
-                if (GetTileSlope(corridor[k]) == SLOPE_FLAT) { pi = k; break; }
-            if (pi < 0) continue;
-            unsigned sc = r1_nearest_town_station(corridor[pi], t.st_a, t.st_b);
-            if (sc == 0xFFFF) continue;
-            r1_place_rail_bits((unsigned)jt, (unsigned)(TRACK_BIT_X | TRACK_BIT_RIGHT | TRACK_BIT_LOWER));
-            for (int k = 0; k <= pi; k++) r1_place_rail((unsigned)corridor[k], 1 /* AXIS_Y */);
-            r1_place_rail_station((unsigned)corridor[pi], sc, 1 /* AXIS_Y platform */);
-            t.st_c = sc;
-            ottd_log("R1-RUNG7: junction at x=%d y=%d, branch len=%d, halt st=%u",
-                     (int)TileX(jt), (int)TileY(jt), pi + 1, sc);
-        }
-        if (t.st_c == 0xFFFF) ottd_log("R1-RUNG7: no branch site found — 2-stop service stays");
-    }
+    // RUNG 7 (network): grow the seed main line into a real graph — a leg to a
+    // halt near EVERY town plus a closure LOOP, so the pathfinder faces genuine
+    // alternative-route choices. The builder returns the served stations in a
+    // tour order; we run the train around all of them.
+    unsigned net_st[16];
+    int nst = r1_build_rail_network(reinterpret_cast<unsigned *>(t.route), t.len,
+                                    (unsigned)dt.value, net_st, 16);
+    t.st_a = (nst > 0) ? net_st[0] : 0xFFFF;
+    t.st_b = (nst > 1) ? net_st[1] : 0xFFFF;
+    t.st_c = (nst > 2) ? net_st[2] : 0xFFFF;
+    if (nst < 2) ottd_log("R1-NET: fewer than 2 stations reachable — train roams unwaged");
 
     CompanyID save_co = _current_company;
     _current_company = COMPANY_FIRST;
@@ -1238,16 +1196,7 @@ static bool r1_make_real_train(void)
     // Orders: far platform first (the depot sits at the line head next to st_a),
     // then home — the same two-stop loop the buses run. Without platforms the
     // train just roams the line (phase A behaviour).
-    if (t.st_a != 0xFFFF && t.st_b != 0xFFFF) {
-        if (t.st_c != 0xFFFF) {
-            // RUNG 7: 3-stop cycle far-main -> branch halt -> near-main; the
-            // middle leg crosses the junction in BOTH directions each cycle.
-            unsigned cycle[3] = { t.st_b, t.st_c, t.st_a };
-            r1_attach_orders(veh, cycle, 3);
-        } else {
-            r1_attach_bus_orders(veh, t.st_b, t.st_a);
-        }
-    }
+    if (nst >= 2) r1_attach_orders(veh, net_st, nst);   // full tour of the network
     veh->vehstatus &= ~VS_STOPPED;            // release: Tick()'s depot logic takes over
 
     t.v = veh;
