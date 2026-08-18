@@ -152,12 +152,14 @@ ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/b1_shims.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/b1z_mark.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/b2_shims.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/b2z_mark.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/build_vehicle_gui.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/bz_mark.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/cargotype.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/cb_mark.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/clear_cmd.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/cz_mark.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/date.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/depot_gui.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/dropdown.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/dz_mark.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/ee_mark.o
@@ -171,6 +173,7 @@ ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_company.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_company_gui.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_deadpools.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_depot.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_depotgui_stubs.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_economy.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_ecostub.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/m1_finance_gui.o
@@ -230,6 +233,7 @@ ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/townname.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/train_cmd.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/tree_cmd.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/vehicle.o
+ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/vehicle_cmd.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/viewport.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/void_cmd.o
 ottdr1.xcoff: /Users/felipe/ottd-macos9/ottd-r1/obj/vv_mark.o

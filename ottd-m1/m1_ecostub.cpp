@@ -71,7 +71,9 @@ void UpdateSignalsInBuffer() {}
 /* ---- company administrivia (bankruptcy path — no company ever goes broke
  *      with the R1 money model, but the code must link) ----------------------- */
 CommandCost CmdCompanyCtrl(DoCommandFlag, CompanyCtrlAction, CompanyID, CompanyRemoveReason, ClientID) { return CommandCost(); }
+#ifndef R1_REAL_DEPOT_GUI  /* vehicle_cmd.cpp owns the real one */
 CommandCost CmdChangeServiceInt(DoCommandFlag, VehicleID, uint16, bool, bool) { return CommandCost(); }
+#endif
 void CompanyAdminUpdate(const Company *) {}
 bool MayCompanyTakeOver(CompanyID, CompanyID) { return false; }
 void SetLocalCompany(CompanyID) {}

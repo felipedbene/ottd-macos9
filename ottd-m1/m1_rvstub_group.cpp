@@ -78,10 +78,12 @@ CommandCost CmdAutoreplaceVehicle(DoCommandFlag, VehicleID)
 
 /* Refitting needs the cargo/subtype capability machinery from vehicle_cmd.cpp's
  * RefitVehicle(); R1 buses carry one fixed cargo, so the command simply fails. */
+#ifndef R1_REAL_DEPOT_GUI  /* vehicle_cmd.cpp owns the real one */
 std::tuple<CommandCost, uint, uint16, CargoArray> CmdRefitVehicle(DoCommandFlag, VehicleID, CargoID, byte, bool, bool, uint8)
 {
 	return { CMD_ERROR, 0, 0, CargoArray() };
 }
+#endif
 
 /* --- GUI notifications ------------------------------------------------------
  * Windows that do not exist cannot be invalidated, opened, or cleared of a
@@ -90,7 +92,9 @@ void AddRemoveEngineFromAutoreplaceAndBuildWindows(VehicleType) {}
 void InvalidateAutoreplaceWindow(EngineID, GroupID) {}
 void ShowEnginePreviewWindow(EngineID) {}
 void DeleteGroupHighlightOfVehicle(const Vehicle *) {}
+#ifndef R1_REAL_DEPOT_GUI  /* depot_gui.cpp owns the real one */
 void DeleteDepotHighlightOfVehicle(const Vehicle *) {}
+#endif
 
 /* Only ever shown in the preview/build dialogs R1 omits. */
 StringID GetEngineCategoryName(EngineID)

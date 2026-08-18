@@ -103,7 +103,9 @@ int HotkeyList::CheckMatch(uint16, bool) const { return -1; } /* -1 == no hotkey
 void InitNewsItemStructs() {}
 
 /* ---- depot window ---- */
+#ifndef R1_REAL_DEPOT_GUI  /* depot_gui.cpp owns the real one */
 void InitDepotWindowBlockSizes() {}
+#endif
 
 /* ---- network chat box (no networking) ---- */
 void NetworkChatMessageLoop() {}

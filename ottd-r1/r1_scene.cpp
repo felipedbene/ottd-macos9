@@ -48,6 +48,7 @@
 #include "roadveh_cmd.h"       // CmdBuildRoadVehicle (the game's own build path)
 #include "train.h"             // Train, ConsistChangeFlags (RUNG 6: real train)
 #include "train_cmd.h"         // CmdBuildRailVehicle
+#include "depot_func.h"        // ShowDepotWindow (R1_REAL_DEPOT_GUI)
 #include "engine_base.h"       // Engine::Get for the real bus engine
 #include "road_map.h"          // GetRoadBits/SetRoadBits (connect the depot to the route)
 #include "road_func.h"         // DiagDirToRoadBits
@@ -1722,7 +1723,19 @@ struct R1MainWindow : Window {
         if (tp.x < 0) return;                        // off-map
         TileIndex t = TileVirtXY((uint)tp.x, (uint)tp.y);
         if      (IsTileType(t, MP_STATION)) r1_user_buy_bus(t);
-        else if (IsTileType(t, MP_RAILWAY) && IsRailDepot(t)) r1_user_buy_train_car();  // RUNG 6: coach purchase
+        else if (IsTileType(t, MP_RAILWAY) && IsRailDepot(t)) {
+#ifdef R1_REAL_DEPOT_GUI
+            ShowDepotWindow(t, VEH_TRAIN);       // the REAL depot window (Buy/Sell live there now)
+#else
+            r1_user_buy_train_car();             // RUNG 6 quick-path coach purchase
+#endif
+        }
+        else if (IsTileType(t, MP_ROAD) && IsRoadDepotTile(t)) {
+#ifdef R1_REAL_DEPOT_GUI
+            ShowDepotWindow(t, VEH_ROAD);        // bus shed: the real window lists the fleet
+            return;
+#endif
+        }
         else if (IsTileType(t, MP_ROAD))    r1_user_place_stop(t);
         else if (IsTileType(t, MP_CLEAR))   r1_build_road_at(t);
     }

@@ -89,7 +89,9 @@ void GetNameOfOwner(Owner, TileIndex) {}
 void DirtyCompanyInfrastructureWindows(CompanyID) {}
 
 /* ---- depots / vehicles ---- */
+#ifndef R1_REAL_DEPOT_GUI  /* depot_gui.cpp owns the real one */
 void ShowDepotWindow(TileIndex, VehicleType) {}
+#endif
 #ifndef R1_REAL_VEHICLE_STACK
 /* Superseded by the real TU (vehicle.cpp). */
 void VehicleEnterDepot(Vehicle *) {}

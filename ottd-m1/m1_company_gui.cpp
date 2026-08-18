@@ -731,8 +731,10 @@ void ShowCompany(CompanyID company)
 static void ShowCompanyInfrastructure(CompanyID) {}
 static void DoSelectCompanyManagerFace(Window *) {}
 void ShowCompanyLiveryWindow(CompanyID, GroupID) {}
-void SetObjectToPlaceWnd(CursorID, PaletteID, HighLightStyle, Window *) {}
-void SetTileSelectSize(int, int) {}
+/* SetObjectToPlaceWnd + SetTileSelectSize stubs REMOVED (depot-GUI wave):
+ * the real viewport.cpp (linked since the render merge) defines both — the
+ * duplicate had been silently tolerated by this ld until the R1-199 link
+ * composition made it a hard (segfaulting) multiple-definition. */
 void ShowNetworkCompanyPasswordWindow(Window *) {}
 /* R1-176: these three are handed to the real economy.cpp (R1_REAL_ECONOMY) —
  * real company value (assets + money) and real share trading. */
