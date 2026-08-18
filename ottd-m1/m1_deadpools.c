@@ -148,7 +148,9 @@ char _display_opt[16]              = {0};   /* byte */
 char _gui_zoom[16]                 = {0};   /* ZoomLevel (int) */
 #endif
 char _loaded_newgrf_features[256]  = {0};   /* GRFLoadedFeatures */
+#ifndef R1_REAL_TRAIN_STACK  /* real _railtypes + reset live in m1_railtypes.cpp (rung 6) */
 char _railtypes[131072]            = {0};   /* RailtypeInfo[RAILTYPE_END] */
+#endif
 
 /* R1 render-merge: the real viewport.cpp (game renderer) is compiled. It
  * references these globals, all OFF the town-render draw path (sign/kdtree

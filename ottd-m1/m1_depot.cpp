@@ -25,6 +25,7 @@
 #include "stdafx.h"
 #include "depot_base.h"
 #include "road_map.h"                    /* MakeRoadDepot, IsRoadDepotTile */
+#include "rail_map.h"                    /* MakeRailDepot (rung 6) */
 #include "company_func.h"                /* _local_company */
 #include "town.h"                        /* MakeDefaultName / ClosestTownFromTile */
 #include "date_func.h"                   /* _date */
@@ -63,6 +64,25 @@ extern "C" unsigned r1_make_depot(unsigned tile, int dir)
 
 	MakeRoadDepot((TileIndex)tile, _local_company, dep->index,
 	              (DiagDirection)dir, ROADTYPE_ROAD);
+	MarkTileDirtyByTile((TileIndex)tile);
+	MakeDefaultName(dep);
+
+	return (unsigned)dep->index;
+}
+
+/* Rail twin of r1_make_depot (rung 6): a real Depot pool object + a raw
+ * MakeRailDepot tile write (exit facing `dir`, base rail type). Same contract:
+ * no CmdBuildTrainDepot (no clear/cost checks) — hand it a clearable tile. */
+extern "C" unsigned r1_make_rail_depot(unsigned tile, int dir)
+{
+	if (!IsValidDiagDirection((DiagDirection)dir)) return 0xFFFF;
+	if (!Depot::CanAllocateItem()) return 0xFFFF;
+
+	Depot *dep = new Depot((TileIndex)tile);
+	dep->build_date = _date;
+
+	MakeRailDepot((TileIndex)tile, _local_company, dep->index,
+	              (DiagDirection)dir, (RailType)0);
 	MarkTileDirtyByTile((TileIndex)tile);
 	MakeDefaultName(dep);
 

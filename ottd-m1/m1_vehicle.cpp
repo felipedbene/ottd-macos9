@@ -143,3 +143,18 @@ extern "C" int r1_first_road_engine(void)
 	for (const Engine *e : Engine::Iterate()) if (e->type == VEH_ROAD) return (int)e->index;
 	return (int)INVALID_ENGINE;
 }
+
+/* First proper rail LOCOMOTIVE (rung 6): not a wagon, plain-rail (the R1 line
+ * is RAILTYPE_RAIL), with real power so ConsistChanged yields a movable cache.
+ * The default 1950 roster's first hit is the Kirby Paul Tank (steam). */
+extern "C" int r1_first_rail_engine(void)
+{
+	for (const Engine *e : Engine::Iterate()) {
+		if (e->type != VEH_TRAIN) continue;
+		if (e->u.rail.railveh_type == RAILVEH_WAGON) continue;
+		if (e->u.rail.railtype != RAILTYPE_RAIL) continue;
+		if (e->u.rail.power == 0) continue;
+		return (int)e->index;
+	}
+	return (int)INVALID_ENGINE;
+}

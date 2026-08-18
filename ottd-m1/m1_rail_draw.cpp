@@ -33,8 +33,15 @@
 #include "rail_map.h"          /* MakeRailNormal, GetTrackBits, TrackBits, RailType */
 #include "company_func.h"      /* _local_company */
 
+#include "track_func.h"        /* TrackBitsToTrackdirBits, DiagDirToDiagTrackBits */
+#include "sprite.h"            /* DrawTileSprites / DrawTileSeqStruct */
+#include "train.h"             /* Train (VehicleEnter_Rail depot logic) */
+#include "vehicle_func.h"      /* VehicleEnterDepot */
+#include "window_func.h"       /* InvalidateWindowData */
+
 #include "table/strings.h"
 #include "table/sprites.h"
+#include "table/track_land.h"  /* _depot_gfx_table (rung 6: real rail depot tile) */
 
 /* rail_cmd.cpp's _track_sloped_sprites: offset from SPR_RAIL_TRACK_Y for
  * track drawn on a (foundation-adjusted) non-flat slope, indexed tileh-1. */
@@ -54,6 +61,7 @@ static const byte _r1_track_sloped_sprites[14] = {
 static Foundation GetFoundation_Rail(TileIndex tile, Slope tileh)
 {
 	if (tileh == SLOPE_FLAT) return FOUNDATION_NONE;
+	if (IsRailDepot(tile)) return FOUNDATION_LEVELED;   /* rung 6: depot always level */
 	bool x_piece = (GetTrackBits(tile) & TRACK_BIT_X) != 0;
 	if (!IsSteepSlope(tileh)) {
 		if (x_piece  && (tileh == SLOPE_NE || tileh == SLOPE_SW)) return FOUNDATION_NONE;
@@ -64,8 +72,26 @@ static Foundation GetFoundation_Rail(TileIndex tile, Slope tileh)
 	return x_piece ? FOUNDATION_INCLINED_X : FOUNDATION_INCLINED_Y;
 }
 
+/* Minimal DrawCommonTileSeq for the depot table: ground, then each building
+ * part as a sortable sprite in the owner's company colour. */
+static void r1_draw_depot_seq(const TileInfo *ti, const DrawTileSprites *dts)
+{
+	DrawGroundSprite(dts->ground.sprite, PAL_NONE);
+	PaletteID pal = COMPANY_SPRITE_COLOUR(GetTileOwner(ti->tile));
+	for (const DrawTileSeqStruct *dtss = dts->seq; !dtss->IsTerminator(); dtss++) {
+		AddSortableSpriteToDraw(dtss->image.sprite, pal,
+			ti->x + dtss->delta_x, ti->y + dtss->delta_y,
+			dtss->size_x, dtss->size_y, dtss->size_z, ti->z + dtss->delta_z);
+	}
+}
+
 static void DrawTile_Rail(TileInfo *ti)
 {
+	if (IsRailDepot(ti->tile)) {
+		if (ti->tileh != SLOPE_FLAT) DrawFoundation(ti, FOUNDATION_LEVELED);
+		r1_draw_depot_seq(ti, &_depot_gfx_table[GetRailDepotDirection(ti->tile)]);
+		return;
+	}
 	TrackBits track = GetTrackBits(ti->tile);
 	Foundation f = GetFoundation_Rail(ti->tile, ti->tileh);
 	if (f != FOUNDATION_NONE) DrawFoundation(ti, f);   /* adjusts ti->tileh/ti->z */
@@ -102,14 +128,89 @@ static void GetTileDesc_Rail(TileIndex tile, TileDesc *td)
 static void TileLoop_Rail(TileIndex tile) {}
 static void ChangeTileOwner_Rail(TileIndex tile, Owner old_owner, Owner new_owner) {}
 
+/* Rung 6: the real TrainController asks this for the drivable tracks — the
+ * old `return 0` was the rail twin of the "orbiting bus" bug (a trackless
+ * wall). Plain tiles expose their TrackBits; a depot exposes its single track
+ * (reachable only from its exit side, like rail_cmd's version). No signals
+ * exist in the R1 world, so the red-signal trackdir set is always empty. */
 static TrackStatus GetTileTrackStatus_Rail(TileIndex tile, TransportType mode, uint sub_mode, DiagDirection side)
 {
-	return 0;
+	if (mode != TRANSPORT_RAIL) return 0;
+	TrackBits bits;
+	if (IsRailDepot(tile)) {
+		DiagDirection dir = GetRailDepotDirection(tile);
+		if (side != INVALID_DIAGDIR && side != dir) return 0;
+		bits = DiagDirToDiagTrackBits(dir);
+	} else {
+		bits = GetTrackBits(tile);
+	}
+	return CombineTrackStatus(TrackBitsToTrackdirBits(bits), TRACKDIR_BIT_NONE);
 }
 
 static CommandCost TerraformTile_Rail(TileIndex tile, DoCommandFlag flags, int z_new, Slope tileh_new)
 {
 	return_cmd_error(STR_EMPTY);
+}
+
+/* RUNG 6 root-cause note: vehicle.cpp's VehicleEnterTile() calls
+ * vehicle_enter_tile_proc UNCONDITIONALLY — a nullptr here is a guaranteed
+ * jump-to-zero on the train's first movement step (measured: silent death on
+ * QEMU and the iMac alike, tracer stopped between "TC: gp" and "same-tile
+ * enter"). Faithful copy of rail_cmd.cpp's VehicleEnter_Track + its
+ * fract-coord tables: handles depot leave (wagon activation) and depot entry. */
+static const byte _r1_fractcoords_behind[4] = { 0x8F, 0x8, 0x80, 0xF8 };
+static const byte _r1_fractcoords_enter[4] = { 0x8A, 0x48, 0x84, 0xA8 };
+static const int8 _r1_deltacoord_leaveoffset[8] = {
+	-1,  0,  1,  0, /* x */
+	 0,  1,  0, -1  /* y */
+};
+
+static VehicleEnterTileStatus VehicleEnter_Rail(Vehicle *u, TileIndex tile, int x, int y)
+{
+	/* This routine applies only to trains in depot tiles. */
+	if (u->type != VEH_TRAIN || !IsRailDepotTile(tile)) return VETSB_CONTINUE;
+
+	DiagDirection dir = GetRailDepotDirection(tile);
+
+	byte fract_coord = (x & 0xF) + ((y & 0xF) << 4);
+
+	/* Make sure a train is not entering the tile from behind. */
+	if (_r1_fractcoords_behind[dir] == fract_coord) return VETSB_CANNOT_ENTER;
+
+	Train *v = Train::From(u);
+
+	/* Leaving depot? */
+	if (v->direction == DiagDirToDir(dir)) {
+		/* Calculate the point where the following wagon should be activated. */
+		int length = v->CalcNextVehicleOffset();
+
+		byte fract_coord_leave =
+			((_r1_fractcoords_enter[dir] & 0x0F) + // x
+				(length + 1) * _r1_deltacoord_leaveoffset[dir]) +
+			(((_r1_fractcoords_enter[dir] >> 4) +  // y
+				((length + 1) * _r1_deltacoord_leaveoffset[dir + 4])) << 4);
+
+		if (fract_coord_leave == fract_coord) {
+			/* Leave the depot. */
+			if ((v = v->Next()) != nullptr) {
+				v->vehstatus &= ~VS_HIDDEN;
+				v->track = (DiagDirToAxis(dir) == AXIS_X ? TRACK_BIT_X : TRACK_BIT_Y);
+			}
+		}
+	} else if (_r1_fractcoords_enter[dir] == fract_coord) {
+		/* Entering depot. */
+		assert(DiagDirToDir(ReverseDiagDir(dir)) == v->direction);
+		v->track = TRACK_BIT_DEPOT,
+		v->vehstatus |= VS_HIDDEN;
+		v->direction = ReverseDir(v->direction);
+		if (v->Next() == nullptr) VehicleEnterDepot(v->First());
+		v->tile = tile;
+
+		InvalidateWindowData(WC_VEHICLE_DEPOT, v->tile);
+		return VETSB_ENTERED_WORMHOLE;
+	}
+
+	return VETSB_CONTINUE;
 }
 
 extern const TileTypeProcs _tile_type_rail_procs = {
@@ -124,7 +225,7 @@ extern const TileTypeProcs _tile_type_rail_procs = {
 	TileLoop_Rail,           // tile_loop_proc
 	ChangeTileOwner_Rail,    // change_tile_owner_proc
 	nullptr,                 // add_produced_cargo_proc
-	nullptr,                 // vehicle_enter_tile_proc
+	VehicleEnter_Rail,       // vehicle_enter_tile_proc
 	GetFoundation_Rail,      // get_foundation_proc
 	TerraformTile_Rail,      // terraform_tile_proc
 };

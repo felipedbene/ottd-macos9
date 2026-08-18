@@ -46,6 +46,8 @@
 #include "command_type.h"      // CommandCost
 #include "roadveh.h"           // R1-144 rung 2: RoadVehicle driven by the REAL controller
 #include "roadveh_cmd.h"       // CmdBuildRoadVehicle (the game's own build path)
+#include "train.h"             // Train, ConsistChangeFlags (RUNG 6: real train)
+#include "train_cmd.h"         // CmdBuildRailVehicle
 #include "engine_base.h"       // Engine::Get for the real bus engine
 #include "road_map.h"          // GetRoadBits/SetRoadBits (connect the depot to the route)
 #include "road_func.h"         // DiagDirToRoadBits
@@ -279,6 +281,7 @@ static int r1_build_road_path(int x0, int y0, int x1, int y1);        // R1-92: 
 static int r1_build_road_multi(const int *xs, const int *ys, int n);         // R1-105: multi-segment road
 static int r1_find_straight_stop(const R1Bus &b, bool corner_end, int *axis);  // R1-95: straight stop tile
 static void r1_lay_rail_line(int x0, int x1, int y);                  // R1-104: lay rail + spawn train
+static bool r1_make_real_train(void);                                 // RUNG 6: real depot + CmdBuildRailVehicle
 static void r1_make_viewport(int scroll_x, int scroll_y, Viewport *vp);  // defined below (draw)
 // Tap-to-zoom cycles this; the draw + pick + bus read it. NORMAL=0..OUT_8X=3.
 static ZoomLevel g_zoom = ZOOM_LVL_OUT_4X;
@@ -318,6 +321,7 @@ static unsigned char r1_hmap[R1_MAP * R1_MAP];
 // After this, GetTileType() over the map returns real MP_CLEAR/MP_ROAD/MP_HOUSE with
 // real per-tile heights, which the game's own viewport renders (slopes, foundations).
 extern "C" int  r1_setup_engines(void);
+extern "C" void r1_reset_railtypes(void);                    // m1_railtypes.cpp (RUNG 6)
 extern "C" int  r1_first_road_engine(void);
 
 extern "C" void r1_build_world(void)
@@ -567,6 +571,10 @@ extern "C" void r1_build_world(void)
     // R1-104: lay a straight rail line on the clear grass above the towns (y=6) and spawn a train
     // that ping-pongs along it. Real MP_RAILWAY tiles (m1_rail_draw.cpp) + a real pooled Train.
     r1_lay_rail_line(20, 44, 6);
+    // RUNG 6: convert the line's train to the real thing — rail depot at the line
+    // head, CmdBuildRailVehicle, released to the real TrainController. Falls back
+    // to the hand-driven puppet if any step refuses.
+    r1_make_real_train();
 
     // Place the industries on their flat pads (bare grass only). index=0 is a dummy —
     // our minimal proc draws from gfx alone and never touches the Industry pool.
@@ -1004,6 +1012,9 @@ static void r1_rung2_setup(void)
     // build ("built nothing"). ResetRoadTypes copies in _original_roadtypes, exactly
     // what the real game does during world init.
     ResetRoadTypes();
+    // RUNG 6: same lesson for rail — the zeroed _railtypes deadpool made
+    // HasPowerOnRail() refuse every engine, so CmdBuildRailVehicle built nothing.
+    r1_reset_railtypes();
     // Zeroed settings match no case in RoadFindPathToDest's pathfinder switch
     // (VPF_NPF=1, VPF_YAPF=2) — R1-147 died on its NOT_REACHED the moment the bus
     // reached its first junction. YAPF is the entry point our BFS shim implements
@@ -1084,13 +1095,13 @@ static void r1_real_bus_tick(R1Bus &b, bool log_events)
 // ===== R1-104: a real TRAIN on real MP_RAILWAY track =====
 // A straight rail line laid on clear grass; one real pooled Train ping-pongs along it (hand-driven,
 // like the bus). ViewportAddVehicles below draws it for free (it iterates the whole vehicle pool).
-struct R1Train { TileIndex route[48]; int len, i, prog, dir; unsigned long last_ticks, accum; Vehicle *v; };
+struct R1Train { TileIndex route[48]; int len, i, prog, dir; unsigned long last_ticks, accum; Vehicle *v; bool real; };
 static R1Train g_train;
 
 // Lay a straight horizontal rail line (x0..x1 at row y) on CLEAR tiles; remember the tiles.
 static void r1_lay_rail_line(int x0, int x1, int y)
 {
-    g_train.len = 0; g_train.i = 0; g_train.dir = 1; g_train.prog = 0; g_train.v = nullptr;
+    g_train.len = 0; g_train.i = 0; g_train.dir = 1; g_train.prog = 0; g_train.v = nullptr; g_train.real = false;
     for (int x = x0; x <= x1 && g_train.len < 48; x++) {
         if (x < 1 || x >= (int)MapMaxX() || y < 1 || y >= (int)MapMaxY()) continue;
         TileIndex t = TileXY((uint)x, (uint)y);
@@ -1099,6 +1110,53 @@ static void r1_lay_rail_line(int x0, int x1, int y)
         g_train.route[g_train.len++] = t;
     }
     ottd_log("R1-104: rail line len=%d at y=%d", g_train.len, y);
+}
+
+// RUNG 6: replace the puppet with a REAL train, built the way the game builds one —
+// in a real rail depot via CmdBuildRailVehicle — and released to the real
+// TrainController (Train::Tick). Mirrors r1_make_real_bus:
+//   * depot: the line's FIRST tile becomes the depot, exit facing down the line
+//     (route[0] is consumed; the drivable line is route[1..len-1] and dead-ends,
+//     which the real controller handles by reversing — a ping-pong service).
+//   * caches: ConsistChanged fills power/weight/length from the real engine spec
+//     (the rung-2 lesson: an empty cache clamps the vehicle to a standstill).
+//   * no orders yet: the train roams its track, which on this topology IS the
+//     ping-pong. Stations + orders arrive with the next step.
+extern "C" int r1_first_rail_engine(void);                   // m1_vehicle.cpp
+extern "C" unsigned r1_make_rail_depot(unsigned tile, int dir);  // m1_depot.cpp
+
+static bool r1_make_real_train(void)
+{
+    R1Train &t = g_train;
+    if (t.len < 4) { ottd_log("R1-RUNG6: rail line too short (len=%d) — puppet stays", t.len); return false; }
+
+    int eng = r1_first_rail_engine();
+    if (eng < 0 || eng == (int)INVALID_ENGINE) { ottd_log("R1-RUNG6: no rail engine in pool"); return false; }
+
+    // Depot on the line's head tile, exit facing route[1].
+    TileIndex dt = t.route[0];
+    DiagDirection exit_dir = DiagdirBetweenTiles(dt, t.route[1]);
+    if (exit_dir == INVALID_DIAGDIR) { ottd_log("R1-RUNG6: route head not adjacent?"); return false; }
+    unsigned depot_id = r1_make_rail_depot((unsigned)dt, (int)exit_dir);
+    if (depot_id == 0xFFFF) { ottd_log("R1-RUNG6: depot pool refused"); return false; }
+
+    CompanyID save_co = _current_company;
+    _current_company = COMPANY_FIRST;
+    Vehicle *veh = nullptr;
+    CmdBuildRailVehicle(DC_EXEC, dt, Engine::Get((EngineID)eng), &veh);
+    _current_company = save_co;
+    if (veh == nullptr) { ottd_log("R1-RUNG6: CmdBuildRailVehicle built nothing"); return false; }
+
+    Train *tv = (Train *)veh;
+    tv->ConsistChanged(CCF_TRACK);            // real cache pass (power/weight/speed)
+    veh->vehstatus &= ~VS_STOPPED;            // release: Tick()'s depot logic takes over
+
+    t.v = veh;
+    t.real = true;
+    ottd_log("R1-RUNG6: train REAL unit=%u engine=%d depot=(%d,%d) exit=%d maxspd=%u power=%u",
+             (uint)veh->unitnumber, eng, (int)TileX(dt), (int)TileY(dt), (int)exit_dir,
+             (uint)tv->vcache.cached_max_speed, (uint)tv->gcache.cached_power);
+    return true;
 }
 
 // Advance + ping-pong the train along its rail line, updating its pooled Vehicle position + sprite.
@@ -1355,7 +1413,19 @@ extern "C" void r1_tick(void)
     }
     for (int ub = 0; ub < g_nubus; ub++)   // R1-105: user-bought buses
         if (r1_bus_move(g_ubus[ub], fast ? 3 : 1)) { r1_update_vehicle(g_ubus[ub]); r1_bus_mark_dirty(g_ubus[ub]); }
-    r1_train_move(fast ? 3 : 1);   // R1-104: the train ping-pongs its rail line
+    // R1-104/RUNG 6: real train runs the real controller; puppet keeps the hand-mover.
+    if (g_train.real && g_train.v != nullptr) {
+        g_train.v->Tick();
+        static unsigned rtn = 0;
+        if ((++rtn & 511) == 1) {
+            const Train *tv = (const Train *)g_train.v;
+            ottd_log("R1 TRAIN(real): x=%d y=%d dir=%d spd=%u vs=0x%x track=0x%x tile=%u",
+                     (int)tv->x_pos, (int)tv->y_pos, (int)tv->direction, (uint)tv->cur_speed,
+                     (unsigned)tv->vehstatus, (unsigned)tv->track, (uint)tv->tile);
+        }
+    } else {
+        r1_train_move(fast ? 3 : 1);   // R1-104: the puppet ping-pongs its rail line
+    }
     // Throttled liveness log: prove on the sink that the clock ticks + town grows.
     // First call confirms the hook fires; then every ~128 ticks show the town
     // climbing (houses/pop) and the calendar advancing (date_fract/year).
