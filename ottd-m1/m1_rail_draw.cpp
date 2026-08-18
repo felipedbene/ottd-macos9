@@ -165,6 +165,22 @@ static const int8 _r1_deltacoord_leaveoffset[8] = {
 	 0,  1,  0, -1  /* y */
 };
 
+/* Real rail_cmd body (was an INT_MAX stub in m1_trainstub — that stranded
+ * wagons in the shed: the depot-leave pull paces each follower out by it). */
+int TicksToLeaveDepot(const Train *v)
+{
+	DiagDirection dir = GetRailDepotDirection(v->tile);
+	int length = v->CalcNextVehicleOffset();
+
+	switch (dir) {
+		case DIAGDIR_NE: return  ((int)(v->x_pos & 0x0F) - ((_r1_fractcoords_enter[dir] & 0x0F) - (length + 1)));
+		case DIAGDIR_SE: return -((int)(v->y_pos & 0x0F) - ((_r1_fractcoords_enter[dir] >> 4)   + (length + 1)));
+		case DIAGDIR_SW: return -((int)(v->x_pos & 0x0F) - ((_r1_fractcoords_enter[dir] & 0x0F) + (length + 1)));
+		case DIAGDIR_NW: return  ((int)(v->y_pos & 0x0F) - ((_r1_fractcoords_enter[dir] >> 4)   - (length + 1)));
+		default: NOT_REACHED();
+	}
+}
+
 static VehicleEnterTileStatus VehicleEnter_Rail(Vehicle *u, TileIndex tile, int x, int y)
 {
 	/* This routine applies only to trains in depot tiles. */

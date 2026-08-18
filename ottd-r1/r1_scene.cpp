@@ -1103,6 +1103,8 @@ struct R1Train {
     TileIndex route[48]; int len, i, prog, dir; unsigned long last_ticks, accum; Vehicle *v; bool real;
     int rv_dwell; unsigned rv_pax;         // RUNG 6 phase B: loading bridge state (mirrors R1Bus)
     unsigned st_a, st_b;                   // platform StationIDs (a = near depot, b = far)
+    unsigned depot_id;                     // Depot::index of the line-head shed
+    int pending_wagons;                    // coach purchases awaiting the next depot visit
 };
 static R1Train g_train;
 
@@ -1162,6 +1164,8 @@ static bool r1_make_real_train(void)
     if (exit_dir == INVALID_DIAGDIR) { ottd_log("R1-RUNG6: route head not adjacent?"); return false; }
     unsigned depot_id = r1_make_rail_depot((unsigned)dt, (int)exit_dir);
     if (depot_id == 0xFFFF) { ottd_log("R1-RUNG6: depot pool refused"); return false; }
+    t.depot_id = depot_id;
+    t.pending_wagons = 0;
 
     // Phase B: two rail platforms on FLAT line tiles (a sloped platform would
     // need the halftile machinery), joined to the nearest towns' stations so
@@ -1207,6 +1211,26 @@ static bool r1_make_real_train(void)
              (uint)veh->unitnumber, eng, (int)TileX(dt), (int)TileY(dt), (int)exit_dir,
              (uint)tv->vcache.cached_max_speed, (uint)tv->gcache.cached_power);
     return true;
+}
+
+// RUNG 6 wagons: clicking the rail depot queues a passenger coach. The
+// coupling commands are only legal with the train STOPPED IN THE DEPOT
+// (CmdMoveRailVehicle's rule), so the click recalls the train with a real
+// go-to-depot order; the tick machine in r1_tick completes the purchase
+// (CmdBuildRailVehicle wagon + CmdMoveRailVehicle) and re-releases it.
+extern "C" int r1_first_pax_wagon(void);   // m1_vehicle.cpp
+
+static void r1_user_buy_train_car(void)
+{
+    R1Train &t = g_train;
+    if (!t.real || t.v == nullptr) return;
+    t.pending_wagons++;
+    Train *tv = (Train *)t.v;
+    if (!tv->current_order.IsType(OT_GOTO_DEPOT) && !tv->IsInDepot()) {
+        tv->current_order.MakeGoToDepot((DepotID)t.depot_id, ODTF_MANUAL);
+        tv->dest_tile = t.route[0];        // the shed at the line head
+    }
+    ottd_log("R1 TRAIN EVENT: coach ordered (%d pending) — train recalled to depot", t.pending_wagons);
 }
 
 // Advance + ping-pong the train along its rail line, updating its pooled Vehicle position + sprite.
@@ -1466,6 +1490,31 @@ extern "C" void r1_tick(void)
     // R1-104/RUNG 6: real train runs the real controller; puppet keeps the hand-mover.
     if (g_train.real && g_train.v != nullptr) {
         g_train.v->Tick();
+        // RUNG 6 wagons: complete queued coach purchases once the train is home.
+        if (g_train.pending_wagons > 0) {
+            Train *tv = (Train *)g_train.v;
+            if (tv->IsInDepot() && (tv->vehstatus & VS_STOPPED)) {
+                int weng = r1_first_pax_wagon();
+                CompanyID save_co = _current_company;
+                _current_company = COMPANY_FIRST;
+                int added = 0;
+                while (g_train.pending_wagons > 0 && weng >= 0 && weng != (int)INVALID_ENGINE) {
+                    Vehicle *w = nullptr;
+                    CmdBuildRailVehicle(DC_EXEC, tv->tile, Engine::Get((EngineID)weng), &w);
+                    if (w == nullptr) { ottd_log("R1 TRAIN EVENT: coach build refused"); break; }
+                    if (CmdMoveRailVehicle(DC_EXEC, w->index, tv->Last()->index, false).Failed()) {
+                        ottd_log("R1 TRAIN EVENT: coach coupling refused");
+                        break;
+                    }
+                    g_train.pending_wagons--; added++;
+                }
+                _current_company = save_co;
+                tv->ConsistChanged(CCF_TRACK);
+                tv->vehstatus &= ~VS_STOPPED;   // back in service; ProcessOrders resumes the list
+                unsigned cars = 0; for (const Vehicle *u = tv; u != nullptr; u = u->Next()) cars++;
+                ottd_log("R1 TRAIN EVENT: %d coach(es) coupled, consist=%u vehicles — back in service", added, cars);
+            }
+        }
         // RUNG 6 phase B loading bridge — the identical shape r1_real_bus_tick
         // uses: R1 cargo moves + dwell, then the REAL LoadUnloadStation finishes
         // the stop (CargoPayment fare, VF_LOADING_FINISHED -> HandleLoading
@@ -1673,6 +1722,7 @@ struct R1MainWindow : Window {
         if (tp.x < 0) return;                        // off-map
         TileIndex t = TileVirtXY((uint)tp.x, (uint)tp.y);
         if      (IsTileType(t, MP_STATION)) r1_user_buy_bus(t);
+        else if (IsTileType(t, MP_RAILWAY) && IsRailDepot(t)) r1_user_buy_train_car();  // RUNG 6: coach purchase
         else if (IsTileType(t, MP_ROAD))    r1_user_place_stop(t);
         else if (IsTileType(t, MP_CLEAR))   r1_build_road_at(t);
     }

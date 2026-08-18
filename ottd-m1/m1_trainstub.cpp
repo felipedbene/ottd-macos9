@@ -104,9 +104,9 @@ bool IsWaitingPositionFree(const Train *, TileIndex, Trackdir, bool) { return tr
 
 void SetSignalsOnBothDir(TileIndex, Track, Owner) {}
 bool IsStationTileBlocked(TileIndex) { return false; }
-/* "Still waiting in depot" — a large positive keeps the leave-depot branch
- * from firing on a train we do not simulate. */
-int TicksToLeaveDepot(const Train *) { return INT_MAX; }
+/* TicksToLeaveDepot moved to m1_rail_draw.cpp as the REAL rail_cmd body
+ * (rung 6 wagons: the INT_MAX stub stranded followers in the shed forever —
+ * the leave-depot pull uses it to pace each wagon out). */
 
 /* ---------------------------------------------------------------------------
  * Groups. m1_rvstub_group.cpp owns GroupStatistics::* and autoreplace; these
