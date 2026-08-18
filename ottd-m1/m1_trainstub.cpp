@@ -53,21 +53,51 @@
 #include "safeguards.h"
 
 /* ---------------------------------------------------------------------------
- * Pathfinder (YAPF + NPF). Same posture as m1_realveh_stubs for road: the
- * entry points exist so train_cmd links, but every answer means "no path".
- * R1 never runs train_cmd::Tick on the cosmetic train.
+ * Pathfinder (YAPF entry points). RUNG 7: no longer "no path" stubs — they
+ * are shims onto the trackdir-aware BFS in m1_pathfind.cpp, the exact posture
+ * road took with r1_road_path. NPF stays inert (VPF_YAPF is the configured
+ * pathfinder).
  * ------------------------------------------------------------------------- */
+extern "C" int r1_rail_dist(unsigned tile, int td, unsigned dest_tile);
+extern "C" int r1_rail_choose_trackdir(unsigned tile, unsigned candidates, unsigned dest_tile, int *best_td);
 
-Track YapfTrainChooseTrack(const Train *, TileIndex, DiagDirection, TrackBits tracks,
+Track YapfTrainChooseTrack(const Train *v, TileIndex tile, DiagDirection enterdir, TrackBits tracks,
 		bool &path_found, bool, PBSTileInfo *, TileIndex *dest)
 {
 	path_found = false;
 	if (dest != nullptr) *dest = INVALID_TILE;
-	return (tracks != TRACK_BIT_NONE) ? FindFirstTrack(tracks) : INVALID_TRACK;
+	if (tracks == TRACK_BIT_NONE) return INVALID_TRACK;
+
+	TrackdirBits candidates = TrackBitsToTrackdirBits(tracks) & DiagdirReachesTrackdirs(enterdir);
+	if (candidates == TRACKDIR_BIT_NONE) return FindFirstTrack(tracks);
+
+	TileIndex target = v->dest_tile;
+	if (target.value == 0 || target.value >= MapSize()) return FindFirstTrack(tracks);
+
+	int best_td = 0;
+	if (r1_rail_choose_trackdir(tile.value, (unsigned)candidates, target.value, &best_td)) {
+		path_found = true;
+		if (dest != nullptr) *dest = target;
+	}
+	return TrackdirToTrack((Trackdir)best_td);
 }
 
 FindDepotData YapfTrainFindNearestDepot(const Train *, int) { return FindDepotData(); }
-bool YapfTrainCheckReverse(const Train *) { return false; }
+
+/* Reverse iff driving on is strictly worse than turning around — this is what
+ * retires the dead-end runaround: after loading mid-line the train now flips
+ * in place when the next platform lies behind it. */
+bool YapfTrainCheckReverse(const Train *v)
+{
+	TileIndex target = v->dest_tile;
+	if (target.value == 0 || target.value >= MapSize()) return false;
+	Trackdir td = v->GetVehicleTrackdir();
+	if (td == INVALID_TRACKDIR) return false;
+	int fwd = r1_rail_dist(v->tile.value, (int)td, target.value);
+	int rev = r1_rail_dist(v->tile.value, (int)ReverseTrackdir(td), target.value);
+	if (rev < 0) return false;
+	return fwd < 0 || rev < fwd;
+}
 bool YapfTrainFindNearestSafeTile(const Train *, TileIndex, Trackdir, bool) { return false; }
 
 Track NPFTrainChooseTrack(const Train *, bool &path_found, bool, PBSTileInfo *)

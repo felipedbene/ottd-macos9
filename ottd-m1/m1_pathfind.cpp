@@ -138,3 +138,91 @@ extern "C" int r1_road_path(unsigned from_tile, unsigned to_tile, unsigned *out,
 	free(parent); free(seen); free(queue);
 	return n;
 }
+
+// ============================================================================
+// RUNG 7: trackdir-aware RAIL BFS — the brain behind the Yapf* train shims in
+// m1_trainstub.cpp. Unlike the road BFS above (tile graph), rail must respect
+// track pieces and entry sides: a corner track connects exactly two tile edges,
+// so the search state is (tile, trackdir). Successors follow the game's own
+// GetTileTrackStatus for every tile type (plain rail, junctions, depots and
+// rail-station platforms all answer through their tile procs), masked by
+// DiagdirReachesTrackdirs — precisely the reachability rule TrainController
+// itself applies at tile boundaries.
+// State packing: (tile << 4) | trackdir. 64x64 map -> 65536 states; the
+// visited bitmap is 8 KB and a full sweep is trivially fast on the G3/G4.
+// ============================================================================
+#include "tile_cmd.h"       // GetTileTrackStatus
+#include "track_func.h"     // TrackdirToExitdir, DiagdirReachesTrackdirs, ...
+
+static const int R1_RAIL_DEPTH_LIMIT = 512;   // tiles; the R1 network is tiny
+
+// Shortest path length (tile steps) from moving state (tile, td) to dest_tile,
+// or -1 when unreachable. Reaching dest by ANY connected trackdir counts.
+extern "C" int r1_rail_dist(unsigned tile, int td, unsigned dest_tile)
+{
+	uint32 size = (uint32)MapSize();
+	if (tile >= size || dest_tile >= size) return -1;
+	if (tile == dest_tile) return 0;
+
+	uint32 nstates = size << 4;
+	uint8 *seen = CallocT<uint8>((nstates + 7) / 8);
+	uint32 *queue = CallocT<uint32>(nstates);   // state | (depth << 20) packed below
+	if (seen == nullptr || queue == nullptr) { free(seen); free(queue); return -1; }
+
+	// queue entries: state in low 20 bits (16 used), depth in high 12 bits.
+	uint32 qhead = 0, qtail = 0;
+	uint32 s0 = ((uint32)tile << 4) | (uint32)(td & 0xF);
+	seen[s0 >> 3] |= 1 << (s0 & 7);
+	queue[qtail++] = s0;
+	int result = -1;
+
+	while (qhead < qtail) {
+		uint32 packed = queue[qhead++];
+		uint32 state = packed & 0xFFFFF;
+		int depth = (int)(packed >> 20);
+		if (depth >= R1_RAIL_DEPTH_LIMIT) continue;
+
+		TileIndex cur{ state >> 4 };
+		Trackdir cur_td = (Trackdir)(state & 0xF);
+
+		DiagDirection exitdir = TrackdirToExitdir(cur_td);
+		TileIndex nbt = TileAddByDiagDir(cur, exitdir);
+		uint32 nb = nbt.value;
+		if (nb >= size) continue;                      // off-map
+
+		TrackStatus ts = GetTileTrackStatus(nbt, TRANSPORT_RAIL, 0, ReverseDiagDir(exitdir));
+		TrackdirBits tds = TrackStatusToTrackdirBits(ts) & DiagdirReachesTrackdirs(exitdir);
+		if (tds == TRACKDIR_BIT_NONE) continue;        // wall / incompatible entry side
+
+		if (nb == dest_tile) { result = depth + 1; break; }
+
+		for (int t2 = 0; t2 < 16; t2++) {
+			if (!(tds & (1 << t2))) continue;
+			uint32 s = (nb << 4) | (uint32)t2;
+			if (seen[s >> 3] & (1 << (s & 7))) continue;
+			seen[s >> 3] |= 1 << (s & 7);
+			queue[qtail++] = s | ((uint32)(depth + 1) << 20);
+		}
+	}
+
+	free(seen); free(queue);
+	return result;
+}
+
+// Pick the best trackdir out of `candidates` (a TrackdirBits mask, already
+// entry-side filtered by the caller) on `tile` toward dest_tile. Returns 1 and
+// writes *best_td when some candidate reaches the destination; 0 otherwise
+// (*best_td then holds the first candidate as a keep-driving fallback).
+extern "C" int r1_rail_choose_trackdir(unsigned tile, unsigned candidates, unsigned dest_tile, int *best_td)
+{
+	int best = -1, best_dist = 0x7FFFFFFF, first = -1;
+	for (int td = 0; td < 16; td++) {
+		if (!(candidates & (1u << td))) continue;
+		if (first < 0) first = td;
+		int d = r1_rail_dist(tile, td, dest_tile);
+		if (d >= 0 && d < best_dist) { best_dist = d; best = td; }
+	}
+	if (best >= 0) { *best_td = best; return 1; }
+	*best_td = (first >= 0) ? first : 0;
+	return 0;
+}

@@ -131,6 +131,29 @@ extern "C" int r1_attach_bus_orders(void *vehicle, unsigned station_a, unsigned 
 	return 1;
 }
 
+/* RUNG 7: n-stop generalisation of the 2-stop helper above, for the rail
+ * network's multi-station cycle (main line + branch). Same construction. */
+extern "C" int r1_attach_orders(void *vehicle, const unsigned *stations, int n)
+{
+	Vehicle *v = (Vehicle *)vehicle;
+	if (v == nullptr || stations == nullptr || n < 1) return 0;
+	if (!Order::CanAllocateItem(n) || !OrderList::CanAllocateItem()) return 0;
+
+	Order *first = nullptr, *prev = nullptr;
+	for (int i = 0; i < n; i++) {
+		Order *o = new Order();
+		o->MakeGoToStation((StationID)stations[i]);
+		o->next = nullptr;
+		if (prev != nullptr) prev->next = o; else first = o;
+		prev = o;
+	}
+
+	OrderList *list = new OrderList(first, v);
+	v->orders = list;
+	v->current_order.MakeGoToStation((StationID)stations[0]);
+	return 1;
+}
+
 /* ---- Validation hook: how many real Orders currently live in the pool. ---- */
 extern "C" unsigned r1_order_count(void)
 {

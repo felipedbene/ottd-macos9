@@ -95,13 +95,45 @@ static void DrawTile_Rail(TileInfo *ti)
 	TrackBits track = GetTrackBits(ti->tile);
 	Foundation f = GetFoundation_Rail(ti->tile, ti->tileh);
 	if (f != FOUNDATION_NONE) DrawFoundation(ti, f);   /* adjusts ti->tileh/ti->z */
+
+	/* RUNG 7: full combo handling mirroring rail_cmd's DrawTrackBits — the
+	 * realized _railtypes gives us the real sprite table, so junctions draw as
+	 * ground + per-piece overlays exactly like vanilla. */
+	const RailtypeInfo *rti = GetRailTypeInfo(GetRailType(ti->tile));
 	SpriteID image;
+	bool junction = false;
 	if (ti->tileh != SLOPE_FLAT) {
-		image = SPR_RAIL_TRACK_Y + _r1_track_sloped_sprites[ti->tileh - 1];
+		image = rti->base_sprites.track_y + _r1_track_sloped_sprites[ti->tileh - 1];
 	} else {
-		image = (track & TRACK_BIT_X) ? SPR_RAIL_TRACK_X : SPR_RAIL_TRACK_Y;
+		switch (track) {
+			case TRACK_BIT_Y:     image = rti->base_sprites.track_y;     break;
+			case TRACK_BIT_X:     image = rti->base_sprites.track_y + 1; break;
+			case TRACK_BIT_UPPER: image = rti->base_sprites.track_y + 2; break;
+			case TRACK_BIT_LOWER: image = rti->base_sprites.track_y + 3; break;
+			case TRACK_BIT_RIGHT: image = rti->base_sprites.track_y + 4; break;
+			case TRACK_BIT_LEFT:  image = rti->base_sprites.track_y + 5; break;
+			case TRACK_BIT_CROSS: image = rti->base_sprites.track_y + 6; break;
+			case TRACK_BIT_HORZ:  image = rti->base_sprites.track_ns;     break;
+			case TRACK_BIT_VERT:  image = rti->base_sprites.track_ns + 1; break;
+			default:
+				junction = true;
+				if ((track & TRACK_BIT_3WAY_NE) == 0) { image = rti->base_sprites.ground;     break; }
+				if ((track & TRACK_BIT_3WAY_SW) == 0) { image = rti->base_sprites.ground + 1; break; }
+				if ((track & TRACK_BIT_3WAY_NW) == 0) { image = rti->base_sprites.ground + 2; break; }
+				if ((track & TRACK_BIT_3WAY_SE) == 0) { image = rti->base_sprites.ground + 3; break; }
+				image = rti->base_sprites.ground + 4;
+				break;
+		}
 	}
 	DrawGroundSprite(image, PAL_NONE);
+	if (junction) {
+		if (track & TRACK_BIT_X)     DrawGroundSprite(rti->base_sprites.single_x, PAL_NONE);
+		if (track & TRACK_BIT_Y)     DrawGroundSprite(rti->base_sprites.single_y, PAL_NONE);
+		if (track & TRACK_BIT_UPPER) DrawGroundSprite(rti->base_sprites.single_n, PAL_NONE);
+		if (track & TRACK_BIT_LOWER) DrawGroundSprite(rti->base_sprites.single_s, PAL_NONE);
+		if (track & TRACK_BIT_LEFT)  DrawGroundSprite(rti->base_sprites.single_w, PAL_NONE);
+		if (track & TRACK_BIT_RIGHT) DrawGroundSprite(rti->base_sprites.single_e, PAL_NONE);
+	}
 }
 
 /* Mirror of rail_cmd's GetSlopePixelZ_Track: real terrain z + foundation. */
@@ -264,6 +296,18 @@ extern "C" void r1_place_rail(unsigned tile, int axis)
 
 	TrackBits bits = (axis & 1) ? TRACK_BIT_Y : TRACK_BIT_X;
 	MakeRailNormal(t, _local_company, bits, (RailType)0);
+}
+
+/* RUNG 7: arbitrary-TrackBits placer for junctions and corner pieces (the
+ * axis-only helper above cannot express X|RIGHT|LOWER). Same raw-write
+ * contract as r1_place_rail. */
+extern "C" void r1_place_rail_bits(unsigned tile, unsigned bits)
+{
+	TileIndex t = (TileIndex)tile;
+	if (t >= MapSize()) return;
+	if (IsTileType(t, MP_VOID)) return;
+	MakeRailNormal(t, _local_company, (TrackBits)(bits & TRACK_BIT_MASK), (RailType)0);
+	MarkTileDirtyByTile(t);
 }
 
 #include "safeguards.h"
