@@ -1686,6 +1686,11 @@ static WindowDesc _r1_info_desc(
     WC_NONE, WC_NONE, 0,
     _r1_info_widgets, lengthof(_r1_info_widgets), nullptr);
 
+// OnRealtimeTick accumulators for the two R1 HUD windows. File-scope on
+// purpose (see the notes at the OnRealtimeTick overrides).
+static uint _r1_info_tick_acc = 0;
+static uint _r1_cash_tick_acc = 0;
+
 struct R1InfoWindow : Window {
     R1InfoWindow(WindowDesc *desc) : Window(desc)
     {
@@ -1726,11 +1731,13 @@ struct R1InfoWindow : Window {
     }
 
     // Redraw the live stats a few times a second so the numbers climb while open.
+    // Accumulator is file-scope: a function-local static inside this weak
+    // (in-class) method loses its allocation in xcofflink and lands ON TOP of
+    // _r1_info_desc (measured) — every tick then corrupts the WindowDesc.
     void OnRealtimeTick(uint delta_ms) override
     {
-        static uint acc = 0;
-        acc += delta_ms;
-        if (acc >= 400) { acc = 0; this->SetWidgetDirty(R1IW_PANEL); }
+        _r1_info_tick_acc += delta_ms;
+        if (_r1_info_tick_acc >= 400) { _r1_info_tick_acc = 0; this->SetWidgetDirty(R1IW_PANEL); }
     }
 };
 
@@ -1773,11 +1780,12 @@ struct R1CashWindow : Window {
     void OnPaint() override { this->DrawWidgets(); }
 
     // Refresh a few times a second so the balance updates live as costs/revenue move it.
+    // File-scope accumulator: the in-method static overlapped _r1_cash_desc
+    // in the final link (xcofflink weak-static bug) — see R1InfoWindow.
     void OnRealtimeTick(uint delta_ms) override
     {
-        static uint acc = 0;
-        acc += delta_ms;
-        if (acc >= 300) { acc = 0; this->SetWidgetDirty(R1CW_PANEL); }
+        _r1_cash_tick_acc += delta_ms;
+        if (_r1_cash_tick_acc >= 300) { _r1_cash_tick_acc = 0; this->SetWidgetDirty(R1CW_PANEL); }
     }
 };
 

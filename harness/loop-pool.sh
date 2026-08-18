@@ -37,7 +37,9 @@ WARM_SETTLE="${WARM_SETTLE:-40}"
 echo "== loop[$SLOT]: build (no AFP) =="
 bash "$H/deploy.sh" --no-share "$@"
 
-TAG=$(grep -o 'R1-[0-9]*' ottd-r1/r1main.c | head -1)
+# Read the tag from the #define specifically — a bare first-match grep once
+# picked up "R1-178" from a code comment above it and gated a healthy run red.
+TAG=$(grep '#define B2_BUILD_TAG' ottd-r1/r1main.c | grep -o 'R1-[0-9]*' | head -1)
 ART="$H/artifacts/$TAG"; mkdir -p "$ART"
 echo "== loop[$SLOT]: tag $TAG =="
 

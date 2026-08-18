@@ -40,6 +40,20 @@
  * the XCOFF link). Same intent as m1_road_stubs.cpp:60 for VehicleCargoList. */
 template <> CargoList<StationCargoList, StationCargoPacketMap>::~CargoList();
 
+/* Mac OS 9 port: StationIDStack's pool accessor lives HERE, out-of-line. The
+ * generic inline GetPool() (weak) kept a function-local static whose
+ * allocation xcofflink loses — measured landing on top of economy.cpp's
+ * _cargo_delivery_destinations. smallstack_type.hpp now only declares it;
+ * this is the one instantiation the game uses (station_type.h's
+ * StationIDStack). Trailing return type so the protected nested pool type
+ * resolves in class scope. */
+template <>
+auto SmallStack<StationID, StationID, INVALID_STATION, 8, 0xFFFD>::GetPool() -> SmallStackPool &
+{
+	static SmallStackPool pool;
+	return pool;
+}
+
 /* R1 rung-b: r1_station_add_cargo (below) makes the StationCargoPacketMap NON-empty. The new
  * StationCargoList::Append odr-uses these two base-class members. DECLARE the explicit
  * specializations HERE — before station_base.h triggers implicit instantiation of the

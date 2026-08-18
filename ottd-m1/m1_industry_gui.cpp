@@ -763,6 +763,11 @@ static GUIIndustryList::FilterFunction * const _filter_funcs[] = { &CargoFilter 
 /**
  * The list of industries.
  */
+/* Scratch buffer for IndustryDirectoryWindow::GetIndustryString. File-scope on
+ * purpose (Mac OS 9 port): as an in-method static of a weak function it lost
+ * its allocation in xcofflink and overlapped the directory widget array. */
+static CargoSuffix _industry_dir_cargo_suffix[INDUSTRY_NUM_OUTPUTS];
+
 class IndustryDirectoryWindow : public Window {
 protected:
 	/* Runtime saved values */
@@ -985,7 +990,7 @@ protected:
 		/* Industry name */
 		SetDParam(p++, i->index);
 
-		static CargoSuffix cargo_suffix[lengthof(i->produced_cargo)];
+		CargoSuffix (&cargo_suffix)[INDUSTRY_NUM_OUTPUTS] = _industry_dir_cargo_suffix;
 		GetAllCargoSuffixes(CARGOSUFFIX_OUT, CST_DIR, i, i->type, indsp, i->produced_cargo, cargo_suffix);
 
 		/* Get industry productions (CargoID, production, suffix, transported) */

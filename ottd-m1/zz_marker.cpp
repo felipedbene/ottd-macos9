@@ -11,9 +11,11 @@
  * survived and the Classic silent-swallow lives in the libstdc++ tail.
  * Remove after the hunt. */
 #include <cstdio>
+extern "C" long b2_maxblock(void);
+extern "C" long b2_freemem(void);
 
 __attribute__((constructor)) static void zz_game_ctors_done(void)
 {
     FILE *f = fopen("premain.txt", "a");
-    if (f != nullptr) { fputs("game ctors done\n", f); fclose(f); }
+    if (f != nullptr) { fprintf(f, "zz(first) mb=%ld fm=%ld\n", b2_maxblock(), b2_freemem()); fclose(f); }
 }

@@ -21,7 +21,7 @@
 
 /* Bumped every deploy so the sink trace unambiguously identifies which binary ran
  * (a stale previously-decoded app on the Mac produces confusingly identical traces). */
-#define B2_BUILD_TAG "R1-183"
+#define B2_BUILD_TAG "R1-187"
 
 /* ROOT-CAUSE FIX ATTEMPT for the intermittent static-init anomaly:
  * C++ static constructors (blitter/driver registries, factory std::strings)
@@ -84,6 +84,7 @@ static void b2_early_heap(void)
 
 /* Exposed so game-side TUs can sample the heap without Mac headers. */
 long b2_maxblock(void) { return (long)MaxBlock(); }
+long b2_freemem(void)  { return (long)FreeMem(); }
 
 extern void ottd_log_init(const char *path);
 extern void ottd_log_set_tag(const char *tag);
@@ -103,7 +104,11 @@ extern void macnet_tcp_accept_test(void);
 __attribute__((constructor(101))) static void r1_premain_probe(void)
 {
     FILE *f = fopen("premain.txt", "w");
-    if (f != NULL) { fputs("ctors began\n", f); fclose(f); }
+    if (f != NULL) {
+        fprintf(f, "ctors began; early heap MaxBlock %ld -> %ld (MaxApplZone), FreeMem=%ld\n",
+                b2_mb_early_before, b2_mb_early_after, (long)FreeMem());
+        fclose(f);
+    }
 }
 
 int main(void)

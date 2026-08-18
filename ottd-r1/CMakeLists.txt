@@ -30,6 +30,15 @@ target_include_directories(ottdr1 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${B2})
 # its symbol into a NEIGHBOURING csect (the rung-2 layout-sensitive Type 2
 # mechanism); with gc off nothing is pruned and layout is stable by construction.
 target_link_options(ottdr1 PRIVATE -save-temps "LINKER:-bnogc")
+# Post-link gate: xcofflink can LOSE the allocation of function-local statics
+# in weak (inline-emitted) functions — the surviving reference lands on a
+# neighbouring csect (found 2026-08-17: GetPools()::pools on top of economy's
+# CMD_ERROR = the Classic silent-launch killer). Fail the build on any hit.
+add_custom_command(TARGET ottdr1 POST_BUILD
+    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tools/xcoff_weak_static_audit.py
+            ${RETRO68_ROOT}/bin/powerpc-apple-macos-objdump
+            $<TARGET_FILE:ottdr1>
+    COMMENT "xcoff weak-static audit")
 target_link_libraries(ottdr1
     # Mac-side render/video driver + scene (reused prebuilt from B2).
     # b2_scene.o replaced by obj/r1_scene.o (from the R1_ENGINE_OBJS glob): draws

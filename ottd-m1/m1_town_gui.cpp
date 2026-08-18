@@ -59,6 +59,10 @@ static void ShowTownAuthorityWindow(uint town) { (void)town; }
 // ----------------------------------------------------------------------------
 
 /* Town view window. */
+/* Once-per-run "towns can't build roads" warning flag; file-scope on purpose
+ * (see the note at its use in OnClick). */
+static bool _warn_town_no_roads = false;
+
 struct TownViewWindow : Window {
 private:
 	Town *town; ///< Town displayed by the window.
@@ -219,9 +223,10 @@ public:
 				break;
 
 			case WID_TV_EXPAND: { // expand town - only available on Scenario editor
-				/* Warn the user if towns are not allowed to build roads, but do this only once per OpenTTD run. */
-				static bool _warn_town_no_roads = false;
-
+				/* Warn the user if towns are not allowed to build roads, but do this only once per OpenTTD run.
+				 * Flag hoisted to file scope (Mac OS 9 port): the in-method
+				 * static of this weak function overlapped a CMD_ERROR csect
+				 * in the final link (xcofflink weak-static bug). */
 				if (!_settings_game.economy.allow_town_roads && !_warn_town_no_roads) {
 					ShowErrorMessage(STR_ERROR_TOWN_EXPAND_WARN_NO_ROADS, INVALID_STRING_ID, WL_WARNING);
 					_warn_town_no_roads = true;
